@@ -158,7 +158,7 @@ export function kpi(label: string, value: string, detail?: string, tone?: 'criti
   </div>`;
 }
 
-export function loginPage(error?: string): string {
+export function loginPage(error?: string, next = ''): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -174,6 +174,7 @@ export function loginPage(error?: string): string {
   <p class="auth__sub">Portfolio intelligence, compliance monitoring, and controlled escalation for a fictional holding group.</p>
   ${error ? `<div class="notice notice--error" role="alert">${esc(error)}</div>` : ''}
   <form method="post" action="/login" class="stack">
+    ${next ? `<input type="hidden" name="next" value="${esc(next)}">` : ''}
     <label class="field"><span class="field__label">Email</span>
       <input class="input" type="email" name="email" autocomplete="username" required autofocus></label>
     <label class="field"><span class="field__label">Password</span>

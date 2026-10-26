@@ -1,6 +1,6 @@
 # Demonstration script and acceptance status
 
-Run this from a clean reset. Times are WAT.
+A hosted instance runs at <https://education-estimated-hung-planner.trycloudflare.com> with the scheduler enabled and the same seed data. The steps below reproduce it from a clean reset locally. Times are WAT.
 
 ```bash
 npm run reset

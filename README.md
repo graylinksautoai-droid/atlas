@@ -8,10 +8,24 @@ What it does: it watches a portfolio of obligations, decides deterministically w
 
 ![Executive overview](docs/screenshots/01-overview.png)
 
+## Live demo
+
+<https://education-estimated-hung-planner.trycloudflare.com>
+
+Sign in with any demo account, all data is synthetic:
+
+- `adaeze.okonkwo@atlas.demo`, executive, read only
+- `tunde.bello@atlas.demo`, compliance operator, can sweep, upload, approve
+
+Password for all three accounts is `AtlasDemo!2026`. The hosted instance runs with the scheduler enabled, so compliance sweeps happen without anyone touching it. The database can be returned to its seeded state at any time with `npm run reset && npm run seed`.
+
+The demo is served through a temporary Cloudflare tunnel from a development machine. If the link does not answer, the deployment steps below reproduce the same instance locally in about five minutes.
+
 ## Screens
 
 | Screen | What it shows |
 | --- | --- |
+| [Sign in](docs/screenshots/00-login.png) | The entry point |
 | [Executive overview](docs/screenshots/01-overview.png) | Live KPIs, subsidiary completion, overdue work, next deadlines |
 | [Alerts and approvals](docs/screenshots/02-alerts.png) | Every open case, ordered by severity |
 | [Escalation awaiting decision](docs/screenshots/03-alert-approval.png) | A model drafted escalation, held for human approval |
@@ -30,7 +44,7 @@ Verified by the test suite and by hand against a running instance:
 - **Human approval** with four guards: role check, CSRF, single-use transition under a row lock, and a state fingerprint that refuses execution if the obligation changed after review.
 - **Document intake** for `.txt` and `.md` under 256 KB, with mechanical facts, deterministic rule findings, and a validated model assessment, each labelled by provenance so an interpretation is never displayed as a fact.
 - **Audit trail** that records what triggered an action, what evidence was used, what was decided, and what happened, with the table refusing updates and deletes.
-- **31 automated tests**, including the full acceptance workflow and the negative cases: rejected approval, stale approval, duplicate execution, invalid transition, unauthorised access, forged CSRF token, malformed model output, invalid upload.
+- **33 automated tests**, including the full acceptance workflow and the negative cases: rejected approval, stale approval, duplicate execution, invalid transition, unauthorised access, forged CSRF token, malformed model output, invalid upload.
 
 Where a capability is absent, the interface says so. Delivery is in application only, the record says `simulated: true` and `external_delivery: none`, and the agent run is marked `DEGRADED` when no model is configured rather than pretending a model wrote the text.
 

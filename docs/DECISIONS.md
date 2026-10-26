@@ -89,3 +89,23 @@ Each entry records the decision, the alternative, and what it costs. Dates are o
 **Why.** The interaction model is: read a page, take a decision, see the result. That is a form. It also means the Content Security Policy can be `script-src 'none'`, which removes the largest class of web vulnerability from the demonstration entirely.
 
 **Cost.** No inline validation, no live filters. Server round trips for everything. Acceptable at this scale, and the CSP is worth more than the polish.
+
+## ADR 10: asset URLs carry the file timestamp
+
+**Chosen.** The stylesheet is linked as `/static/app.css?v=<mtime>`, computed once at boot from the file's modification time. Static files are served with `max-age=0` outside production.
+
+**Rejected.** A manual version constant, which someone forgets to bump, and a long cache lifetime in development, which shows the reviewer a stale stylesheet after an edit and looks like a layout bug.
+
+**Why.** The first version of this app shipped a dashboard whose subsidiary table appeared clipped; the cause was a cached stylesheet, not the layout. A cached asset that outlives its own bytes is a correctness problem for anyone reviewing the work.
+
+**Cost.** The URL changes whenever the file does, so each deploy re-downloads 12 KB. Irrelevant here.
+
+## ADR 11: browsers are redirected to sign in, API clients get a 401
+
+**Chosen.** An unauthenticated request for a page with `Accept: text/html` returns `302` to `/login?next=<path>`; the form carries the destination in a hidden field, and only same-site paths are accepted after sign-in. Unauthenticated `/api/*` requests still return a JSON `401`.
+
+**Rejected.** A single response shape for both callers. An executive opening a bookmark and getting a JSON error body is a defect, and a redirect for an API client breaks scripted callers.
+
+**Why.** The hosted demonstration is shared as a link. The first thing a reviewer does is open it, and the first response should be a sign-in form.
+
+**Cost.** One branch in the error handler and a validation helper. Two tests cover it, including the off-site destination case.

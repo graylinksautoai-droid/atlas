@@ -101,6 +101,13 @@ class HttpError extends Error {
   }
 }
 
+/** Only same-site paths are accepted as a post-login destination. */
+function safeNext(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return '';
+  return value.slice(0, 200);
+}
+
 function requireUser(user: SessionUser | null): SessionUser {
   if (!user) throw new HttpError(401, 'Sign in to continue.');
   return user;
@@ -139,6 +146,12 @@ app.setErrorHandler((error, req, reply) => {
 
   if (status >= 500) req.log.error({ err: error, url: req.url }, 'request failed');
 
+  // A browser hitting a protected page should land on the sign-in form, not an error page.
+  if (status === 401 && wantsHtml(req) && !req.url.startsWith('/api')) {
+    const next = req.url.startsWith('/') && !req.url.startsWith('/login') ? req.url : '';
+    return reply.code(302).header('location', next ? `/login?next=${encodeURIComponent(next)}` : '/login').send();
+  }
+
   if (wantsHtml(req) || req.url.startsWith('/static')) {
     return page(reply, `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${status} · ATLAS</title><link rel="stylesheet" href="${cssHref}"></head><body class="auth"><main class="auth__panel">${errorPage(status, message)}</main></body></html>`, status);
   }
@@ -155,7 +168,8 @@ app.setNotFoundHandler((req, reply) => {
 app.get('/login', async (req, reply) => {
   const user = await currentUser(req);
   if (user) return reply.redirect('/');
-  return page(reply, loginPage());
+  const next = typeof (req.query as { next?: string })?.next === 'string' ? safeNext((req.query as { next?: string }).next) : '';
+  return page(reply, loginPage(undefined, next));
 });
 
 app.post(
@@ -165,7 +179,7 @@ app.post(
     const body = (req.body ?? {}) as Record<string, string>;
     const email = String(body.email ?? '').trim();
     const password = String(body.password ?? '');
-    if (!email || !password) return page(reply, loginPage('Enter your email and password.'), 400);
+    if (!email || !password) return page(reply, loginPage('Enter your email and password.', safeNext(body.next)), 400);
 
     const user = await findUserByEmail(email);
     const ok = user && user.is_active ? await verifyPassword(password, user.password_hash) : false;
@@ -178,7 +192,7 @@ app.post(
         detail: { email: email.slice(0, 120) },
         requestId: req.id,
       });
-      return page(reply, loginPage('Those credentials were not accepted.'), 401);
+      return page(reply, loginPage('Those credentials were not accepted.', safeNext(body.next)), 401);
     }
 
     const session = await createSession(user.id);
@@ -198,7 +212,7 @@ app.post(
       detail: { role: user.role },
       requestId: req.id,
     });
-    return reply.redirect('/');
+    return reply.redirect(safeNext(body.next) || '/');
   },
 );
 

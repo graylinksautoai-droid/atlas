@@ -62,6 +62,35 @@ test('unauthenticated page requests are refused rather than rendered', async () 
   assert.match(response.body, /Sign in to continue/);
 });
 
+test('a browser is sent to the sign-in form and returned to the page it asked for', async () => {
+  const response = await app.inject({ method: 'GET', url: '/alerts', headers: { accept: 'text/html' } });
+  assert.equal(response.statusCode, 302);
+  assert.equal(response.headers.location, '/login?next=%2Falerts');
+
+  const form = await app.inject({ method: 'GET', url: '/login?next=%2Falerts' });
+  assert.match(form.body, /name="next" value="\/alerts"/);
+
+  const signIn = await app.inject({
+    method: 'POST',
+    url: '/login',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    payload: 'email=tunde.bello%40atlas.demo&password=AtlasDemo%212026&next=%2Falerts',
+  });
+  assert.equal(signIn.statusCode, 302);
+  assert.equal(signIn.headers.location, '/alerts');
+});
+
+test('a crafted off-site destination is ignored after sign-in', async () => {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/login',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    payload: 'email=tunde.bello%40atlas.demo&password=AtlasDemo%212026&next=https%3A%2F%2Fevil.example',
+  });
+  assert.equal(response.statusCode, 302);
+  assert.equal(response.headers.location, '/');
+});
+
 test('unauthenticated API requests return a JSON error, not a stack trace', async () => {
   const response = await app.inject({ method: 'GET', url: '/api/summary' });
   assert.equal(response.statusCode, 401);
