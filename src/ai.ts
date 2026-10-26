@@ -87,7 +87,7 @@ async function chat(system: string, user: string): Promise<ChatResult> {
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${config.ai.apiKey}`,
-        'http-referer': 'https://github.com/Zaygalx/atlas',
+        'http-referer': 'https://github.com/graylinksautoai-droid/atlas',
         'x-title': 'ATLAS demonstration',
       },
       body: JSON.stringify(body),
