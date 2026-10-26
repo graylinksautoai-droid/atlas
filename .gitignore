@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+logs/
+data/
+uploads/
+coverage/
+.DS_Store
+.vscode/
+.idea/
+*.tsbuildinfo
+tmp/
+scratch/

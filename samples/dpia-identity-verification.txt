@@ -1,0 +1,13 @@
+DATA PROTECTION IMPACT ASSESSMENT
+Sahel GovTech, identity verification integration
+
+Scope
+This assessment covers the biometric matching service used by the state revenue platform, including the vendor hosting environment and the retention of verification records.
+
+Findings
+The processing relies on consent captured at enrolment. Records are retained for seven years, which is longer than the retention schedule approved by the agency. Access is limited to twelve named administrators. Transfers to the vendor occur over an encrypted channel.
+
+Potential inconsistency
+Retention of seven years conflicts with the three year deletion schedule approved for this processing activity.
+
+Prepared by the delivery team, reporting period Q3 2026.

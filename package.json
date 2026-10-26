@@ -1,0 +1,34 @@
+{
+  "name": "atlas-portfolio-intelligence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ATLAS, portfolio intelligence and autonomous compliance monitoring for a fictional holding company. Demonstration project.",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "dev": "node --watch src/server.ts",
+    "migrate": "node scripts/migrate.ts",
+    "seed": "node scripts/seed.ts",
+    "reset": "node scripts/reset.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --test-concurrency=1 tests/*.test.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/formbody": "^8.0.2",
+    "@fastify/multipart": "^9.0.3",
+    "@fastify/rate-limit": "^10.2.2",
+    "@fastify/static": "^8.0.4",
+    "fastify": "^5.2.1",
+    "pg": "^8.13.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.3"
+  }
+}
