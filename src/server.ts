@@ -27,6 +27,7 @@ import { confirmObligationStatus } from './obligations.ts';
 import { decideApproval } from './agent.ts';
 import { ingestDocument, documentDetail, validateTextUpload } from './documents.ts';
 import * as portfolio from './portfolio.ts';
+import { sendTestNotification } from './notify.ts';
 import { layout, loginPage, esc, fmtDateTime, notice, titleCase } from './views/layout.ts';
 import {
   overviewPage,
@@ -561,6 +562,40 @@ app.get('/activity', async (req, reply) => {
         modelLabel: modelConfigured ? config.ai.model : 'not configured, deterministic only',
       }),
       wide: true,
+    }),
+  );
+});
+
+/* Admin / development routes --------------------------------------------- */
+
+/** Test-delivery endpoint. Disabled in production; requires ADMIN role + CSRF. */
+app.post('/admin/test-notification', async (req, reply) => {
+  if (config.env === 'production') throw new HttpError(404, 'Not found.');
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage', 'Only administrators can send test notifications.');
+  checkCsrf(req, user);
+  const result = await sendTestNotification({ requestedBy: user.id });
+  const kind = result.status === 'sent' ? 'ok' : result.status === 'failed' ? 'error' : 'warn';
+  const message = result.status === 'sent'
+    ? `Test notification sent to ${result.recipients.length} recipient(s). Message ID: ${result.messageId ?? 'n/a'}`
+    : result.status === 'failed'
+      ? `Delivery failed: ${result.error ?? 'unknown error'}`
+      : `Skipped: ${result.error ?? 'SMTP not configured'}`;
+  const [runs, trail] = await Promise.all([portfolio.recentAgentActivity(30), portfolio.auditTrail({ limit: 120 })]);
+  return page(
+    reply,
+    layout({
+      user,
+      title: 'Agent activity and audit',
+      active: 'activity',
+      subtitle: 'What ran, what it saw, what it decided, and what a human then did.',
+      wide: true,
+      body: notice(kind, message) + activityPage({
+        user,
+        runs,
+        audit: trail,
+        modelLabel: modelConfigured ? config.ai.model : 'not configured, deterministic only',
+      }),
     }),
   );
 });

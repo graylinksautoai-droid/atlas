@@ -12,6 +12,7 @@ import {
   type Severity,
 } from './rules.ts';
 import { handleAlert } from './agent.ts';
+import { notifyCriticalAlert } from './notify.ts';
 
 const LOCK_KEY = 727_001;
 
@@ -269,6 +270,20 @@ async function evaluateObligation(
         checkId,
       });
       runs += 1;
+    }
+    // Fire a critical notification for new CRITICAL alerts (fire-and-forget;
+    // must never throw or fail the compliance sweep).
+    if (result.alertId && candidate.severity === 'CRITICAL') {
+      notifyCriticalAlert({
+        alertId: result.alertId,
+        alertType: candidate.type,
+        severity: 'CRITICAL',
+        subsidiaryName: row.subsidiary_name,
+        obligationTitle: row.title,
+        evidenceSummary: candidate.evidence,
+        recommendedAction: candidate.action,
+        dueAt: row.due_at,
+      }).catch(() => undefined);
     }
   }
   return { alerts, runs };
