@@ -94,7 +94,6 @@ export function statusTag(status: string): string {
   return `<span class="tag tag--${cls}"><span class="tag__dot" aria-hidden="true"></span>${esc(status.replace(/_/g, '\u00a0'))}</span>`;
 }
 
-/* SVG icons — inline, so no external requests are needed */
 const ICONS: Record<string, string> = {
   overview:      `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><rect x="1" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/></svg>`,
   subsidiaries:  `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 1L1 5.5V15h14V5.5L8 1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 15v-5h5v5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`,
@@ -103,9 +102,10 @@ const ICONS: Record<string, string> = {
   documents:     `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3 2h7l3 3v9H3V2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 2v3h3M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
   alerts:        `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 1.5L1 13h14L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
   activity:      `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M1 8h2.5L5 4l3 8 2-5 1.5 2.5H15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  admin:         `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="5" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M2 14c0-3 2-5 6-5s6 2 6 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
 };
 
-const NAV: Array<{ href: string; label: string; key: string }> = [
+const NAV: Array<{ href: string; label: string; key: string; roles?: string[] }> = [
   { href: '/',             label: 'Overview',         key: 'overview'      },
   { href: '/subsidiaries', label: 'Subsidiaries',     key: 'subsidiaries'  },
   { href: '/projects',     label: 'Projects',         key: 'projects'      },
@@ -113,6 +113,7 @@ const NAV: Array<{ href: string; label: string; key: string }> = [
   { href: '/documents',    label: 'Documents',        key: 'documents'     },
   { href: '/alerts',       label: 'Alerts',           key: 'alerts'        },
   { href: '/activity',     label: 'Agent activity',   key: 'activity'      },
+  { href: '/admin',        label: 'Administration',   key: 'admin',        roles: ['ADMIN'] },
 ];
 
 export function layout(input: {
@@ -124,11 +125,12 @@ export function layout(input: {
   csrf?: string;
   wide?: boolean;
 }): string {
-  const nav = NAV.map((item) => {
-    const active = item.key === input.active;
-    const icon = ICONS[item.key] ?? '';
-    return `<a class="rail__link${active ? ' is-active' : ''}" href="${item.href}"${active ? ' aria-current="page"' : ''}>${icon}${esc(item.label)}</a>`;
-  }).join('');
+  const nav = NAV.filter((item) => !item.roles || item.roles.includes(input.user.role))
+    .map((item) => {
+      const active = item.key === input.active;
+      const icon = ICONS[item.key] ?? '';
+      return `<a class="rail__link${active ? ' is-active' : ''}" href="${item.href}"${active ? ' aria-current="page"' : ''}>${icon}${esc(item.label)}</a>`;
+    }).join('');
 
   return `<!doctype html>
 <html lang="en">

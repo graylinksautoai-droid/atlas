@@ -1491,6 +1491,20 @@ input[type="file"].input { padding: 7px; font-size: 12.5px; }
    24. Accessibility utilities
    ========================================================================= */
 
+/* ── Admin hub navigation cards ─────────────────────────────────────────── */
+.kpi--link {
+  cursor: pointer;
+  transition: box-shadow 120ms ease, transform 80ms ease;
+}
+.kpi--link:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.kpi--link:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
 /* Screen-reader-only — visually hidden but announced by assistive technology */
 .sr-only {
   position: absolute;

@@ -1472,3 +1472,631 @@ export function errorPage(status: number, message: string): string {
     </div>
   </section>`;
 }
+
+/* =========================================================================
+   Administration pages
+   All admin pages are only rendered after the server has verified 'manage'.
+   No sensitive data (hashes, raw keys) is ever passed to these functions.
+   ========================================================================= */
+
+import type {
+  AdminUser,
+  SubsidiaryRow,
+  ProjectAdminRow,
+  ObligationAdminRow,
+} from '../admin.ts';
+
+/* ── User management ─────────────────────────────────────────────────────── */
+
+export function adminUsersPage(data: {
+  csrf: string;
+  users: AdminUser[];
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const rows = data.users.length
+    ? data.users.map((u) => `<tr>
+        <td>
+          <a class="link" href="/admin/users/${esc(u.id)}/edit">${esc(u.name)}</a>
+          <span class="cell__sub">${esc(u.email)}</span>
+        </td>
+        <td>${statusTag(u.role)}</td>
+        <td>${u.is_active ? statusTag('ACTIVE') : statusTag('ON_HOLD')}</td>
+        <td class="num">${fmtDateTime(u.created_at)}</td>
+        <td>
+          <a class="btn btn--ghost btn--small" href="/admin/users/${esc(u.id)}/edit">Edit</a>
+        </td>
+      </tr>`).join('')
+    : `<tr><td colspan="5">${emptyState('No users', 'Create the first account below.')}</td></tr>`;
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-users">
+      <div class="panel__head">
+        <h2 id="h-users" class="panel__title">User accounts</h2>
+        <p class="panel__meta">${data.users.length} registered</p>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Name / email</th>
+              <th scope="col">Role</th>
+              <th scope="col">Status</th>
+              <th scope="col" class="num">Created</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="h-new-user">
+      <div class="panel__head">
+        <h2 id="h-new-user" class="panel__title">Create user</h2>
+      </div>
+      <form method="post" action="/admin/users" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <label class="field">
+          <span class="field__label">Full name <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="name" required minlength="2" maxlength="120" autocomplete="off">
+        </label>
+        <label class="field">
+          <span class="field__label">Email address <span aria-hidden="true">*</span></span>
+          <input class="input" type="email" name="email" required autocomplete="off" spellcheck="false">
+        </label>
+        <label class="field">
+          <span class="field__label">Role <span aria-hidden="true">*</span></span>
+          <select class="input input--select" name="role" required>
+            <option value="">Choose a role</option>
+            <option value="EXEC">EXEC — read only</option>
+            <option value="COMPLIANCE">COMPLIANCE — sweeps, uploads, approvals</option>
+            <option value="ADMIN">ADMIN — full access</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Temporary password <span aria-hidden="true">*</span></span>
+          <input class="input" type="password" name="password" required minlength="12"
+            autocomplete="new-password"
+            aria-describedby="pw-hint">
+          <span id="pw-hint" class="panel__meta">Minimum 12 characters. The user should change this on first sign-in.</span>
+        </label>
+        <button class="btn btn--primary" type="submit">Create user</button>
+      </form>
+    </section>
+  </div>`;
+}
+
+export function adminUserEditPage(data: {
+  csrf: string;
+  user: AdminUser;
+  isSelf: boolean;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const u = data.user;
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a class="link" href="/admin/users">Users</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">${esc(u.name)}</span>
+  </nav>
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-edit-user">
+      <div class="panel__head">
+        <h2 id="h-edit-user" class="panel__title">Edit account</h2>
+        <p class="panel__meta">${esc(u.email)}</p>
+      </div>
+      <form method="post" action="/admin/users/${esc(u.id)}" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <input type="hidden" name="_method" value="PUT">
+        <label class="field">
+          <span class="field__label">Full name <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="name" value="${esc(u.name)}" required minlength="2" maxlength="120">
+        </label>
+        <label class="field">
+          <span class="field__label">Role <span aria-hidden="true">*</span></span>
+          <select class="input input--select" name="role" required ${data.isSelf ? 'disabled' : ''}>
+            <option value="EXEC"   ${u.role === 'EXEC' ? 'selected' : ''}>EXEC — read only</option>
+            <option value="COMPLIANCE" ${u.role === 'COMPLIANCE' ? 'selected' : ''}>COMPLIANCE — sweeps, uploads, approvals</option>
+            <option value="ADMIN"  ${u.role === 'ADMIN' ? 'selected' : ''}>ADMIN — full access</option>
+          </select>
+          ${data.isSelf ? `<input type="hidden" name="role" value="${esc(u.role)}">` : ''}
+          ${data.isSelf ? '<p class="panel__meta">You cannot change your own role.</p>' : ''}
+        </label>
+        <label class="field">
+          <span class="field__label">Account status</span>
+          <select class="input input--select" name="is_active" ${data.isSelf ? 'disabled' : ''}>
+            <option value="1" ${u.is_active ? 'selected' : ''}>Active</option>
+            <option value="0" ${!u.is_active ? 'selected' : ''}>Deactivated</option>
+          </select>
+          ${data.isSelf ? `<input type="hidden" name="is_active" value="${u.is_active ? '1' : '0'}">` : ''}
+          ${data.isSelf ? '<p class="panel__meta">You cannot deactivate your own account.</p>' : ''}
+        </label>
+        <button class="btn btn--primary" type="submit">Save changes</button>
+        <a class="btn btn--ghost" href="/admin/users">Cancel</a>
+      </form>
+    </section>
+    <section class="panel" aria-labelledby="h-reset-pw">
+      <div class="panel__head">
+        <h2 id="h-reset-pw" class="panel__title">Reset password</h2>
+      </div>
+      <form method="post" action="/admin/users/${esc(u.id)}/password" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <label class="field">
+          <span class="field__label">New password <span aria-hidden="true">*</span></span>
+          <input class="input" type="password" name="password" required minlength="12"
+            autocomplete="new-password" aria-describedby="pw2-hint">
+          <span id="pw2-hint" class="panel__meta">Minimum 12 characters. All existing sessions for this user will be invalidated.</span>
+        </label>
+        <button class="btn btn--ghost" type="submit">Set new password</button>
+      </form>
+    </section>
+  </div>`;
+}
+
+/* ── Subsidiary admin ─────────────────────────────────────────────────────── */
+
+export function adminSubsidiariesPage(data: {
+  csrf: string;
+  subsidiaries: SubsidiaryRow[];
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const rows = data.subsidiaries.length
+    ? data.subsidiaries.map((s) => `<tr>
+        <td>
+          <a class="link" href="/admin/subsidiaries/${esc(s.id)}/edit">${esc(s.name)}</a>
+          <span class="cell__sub">${esc(s.code)}</span>
+        </td>
+        <td>${esc(s.sector)}</td>
+        <td>
+          <a class="btn btn--ghost btn--small" href="/admin/subsidiaries/${esc(s.id)}/edit">Edit</a>
+        </td>
+      </tr>`).join('')
+    : `<tr><td colspan="3">${emptyState('No subsidiaries', 'Add the first one.')}</td></tr>`;
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-subs-admin">
+      <div class="panel__head">
+        <h2 id="h-subs-admin" class="panel__title">Subsidiaries</h2>
+        <p class="panel__meta">${data.subsidiaries.length} registered</p>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Name / code</th>
+              <th scope="col">Sector</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="h-new-sub">
+      <div class="panel__head">
+        <h2 id="h-new-sub" class="panel__title">Add subsidiary</h2>
+      </div>
+      <form method="post" action="/admin/subsidiaries" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <label class="field">
+          <span class="field__label">Code <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="code" required minlength="2" maxlength="20"
+            style="text-transform:uppercase" placeholder="e.g. ATLNRG">
+        </label>
+        <label class="field">
+          <span class="field__label">Name <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="name" required minlength="2" maxlength="120">
+        </label>
+        <label class="field">
+          <span class="field__label">Sector <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="sector" required minlength="2" maxlength="80"
+            placeholder="e.g. Energy, Finance, Technology">
+        </label>
+        <label class="field">
+          <span class="field__label">Description</span>
+          <input class="input" type="text" name="description" maxlength="400">
+        </label>
+        <button class="btn btn--primary" type="submit">Add subsidiary</button>
+      </form>
+    </section>
+  </div>`;
+}
+
+export function adminSubsidiaryEditPage(data: {
+  csrf: string;
+  subsidiary: SubsidiaryRow;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const s = data.subsidiary;
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a class="link" href="/admin/subsidiaries">Subsidiaries</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">${esc(s.name)}</span>
+  </nav>
+  <section class="panel" aria-labelledby="h-edit-sub">
+    <div class="panel__head">
+      <h2 id="h-edit-sub" class="panel__title">Edit subsidiary</h2>
+      <p class="panel__meta">${esc(s.code)}</p>
+    </div>
+    <form method="post" action="/admin/subsidiaries/${esc(s.id)}" class="stack">
+      <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+      <input type="hidden" name="_method" value="PUT">
+      <label class="field">
+        <span class="field__label">Name <span aria-hidden="true">*</span></span>
+        <input class="input" type="text" name="name" value="${esc(s.name)}" required minlength="2" maxlength="120">
+      </label>
+      <label class="field">
+        <span class="field__label">Sector <span aria-hidden="true">*</span></span>
+        <input class="input" type="text" name="sector" value="${esc(s.sector)}" required minlength="2" maxlength="80">
+      </label>
+      <label class="field">
+        <span class="field__label">Description</span>
+        <input class="input" type="text" name="description" value="${esc(s.description)}" maxlength="400">
+      </label>
+      <div class="row">
+        <button class="btn btn--primary" type="submit">Save changes</button>
+        <a class="btn btn--ghost" href="/admin/subsidiaries">Cancel</a>
+      </div>
+    </form>
+  </section>`;
+}
+
+/* ── Project admin ───────────────────────────────────────────────────────── */
+
+export function adminProjectsPage(data: {
+  csrf: string;
+  projects: ProjectAdminRow[];
+  subsidiaries: Array<{ id: string; name: string; code: string }>;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const rows = data.projects.length
+    ? data.projects.map((p) => `<tr>
+        <td>
+          <a class="link" href="/admin/projects/${esc(p.id)}/edit">${esc(p.name)}</a>
+          <span class="cell__sub">${esc(p.code)}</span>
+        </td>
+        <td>${esc(p.subsidiary_name)}</td>
+        <td>${statusTag(p.status)}</td>
+        <td class="num">${esc(p.obligation_count)}</td>
+        <td>
+          <a class="btn btn--ghost btn--small" href="/admin/projects/${esc(p.id)}/edit">Edit</a>
+        </td>
+      </tr>`).join('')
+    : `<tr><td colspan="5">${emptyState('No projects', 'Add the first one.')}</td></tr>`;
+
+  const subOptions = data.subsidiaries.map((s) =>
+    `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.code)})</option>`
+  ).join('');
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-projects-admin">
+      <div class="panel__head">
+        <h2 id="h-projects-admin" class="panel__title">Projects</h2>
+        <p class="panel__meta">${data.projects.length} total</p>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Project</th>
+              <th scope="col">Subsidiary</th>
+              <th scope="col">Status</th>
+              <th scope="col" class="num">Obligations</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="h-new-project">
+      <div class="panel__head">
+        <h2 id="h-new-project" class="panel__title">Add project</h2>
+      </div>
+      <form method="post" action="/admin/projects" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <label class="field">
+          <span class="field__label">Subsidiary <span aria-hidden="true">*</span></span>
+          <select class="input input--select" name="subsidiaryId" required>
+            <option value="">Select subsidiary</option>
+            ${subOptions}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Code <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="code" required minlength="2" maxlength="20"
+            style="text-transform:uppercase" placeholder="e.g. ATLNRG-001">
+        </label>
+        <label class="field">
+          <span class="field__label">Name <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="name" required minlength="2" maxlength="120">
+        </label>
+        <label class="field">
+          <span class="field__label">Status</span>
+          <select class="input input--select" name="status">
+            <option value="ACTIVE" selected>Active</option>
+            <option value="AT_RISK">At risk</option>
+            <option value="ON_HOLD">On hold</option>
+            <option value="COMPLETED">Completed</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Budget (₦)</span>
+          <input class="input" type="number" name="budgetNgn" min="0" step="0.01" placeholder="Leave blank if unknown">
+        </label>
+        <label class="field">
+          <span class="field__label">Start date <span aria-hidden="true">*</span></span>
+          <input class="input" type="date" name="startDate" required>
+        </label>
+        <label class="field">
+          <span class="field__label">Target completion</span>
+          <input class="input" type="date" name="targetDate">
+        </label>
+        <button class="btn btn--primary" type="submit">Add project</button>
+      </form>
+    </section>
+  </div>`;
+}
+
+export function adminProjectEditPage(data: {
+  csrf: string;
+  project: ProjectAdminRow & { start_date: Date; target_date: Date | null; budget_ngn: string | null };
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const p = data.project;
+  const startVal = p.start_date ? new Date(p.start_date).toISOString().slice(0, 10) : '';
+  const targetVal = p.target_date ? new Date(p.target_date).toISOString().slice(0, 10) : '';
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a class="link" href="/admin/projects">Projects</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">${esc(p.name)}</span>
+  </nav>
+  <section class="panel" aria-labelledby="h-edit-project">
+    <div class="panel__head">
+      <h2 id="h-edit-project" class="panel__title">Edit project</h2>
+      <p class="panel__meta">${esc(p.code)} · ${esc(p.subsidiary_name)}</p>
+    </div>
+    <form method="post" action="/admin/projects/${esc(p.id)}" class="stack">
+      <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+      <input type="hidden" name="_method" value="PUT">
+      <label class="field">
+        <span class="field__label">Name <span aria-hidden="true">*</span></span>
+        <input class="input" type="text" name="name" value="${esc(p.name)}" required minlength="2" maxlength="120">
+      </label>
+      <label class="field">
+        <span class="field__label">Status</span>
+        <select class="input input--select" name="status">
+          ${['ACTIVE','AT_RISK','ON_HOLD','COMPLETED'].map((s) =>
+            `<option value="${s}" ${p.status === s ? 'selected' : ''}>${s.replace('_',' ').toLowerCase()}</option>`
+          ).join('')}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field__label">Budget (₦)</span>
+        <input class="input" type="number" name="budgetNgn" min="0" step="0.01"
+          value="${esc(p.budget_ngn ?? '')}">
+      </label>
+      <label class="field">
+        <span class="field__label">Start date <span aria-hidden="true">*</span></span>
+        <input class="input" type="date" name="startDate" value="${esc(startVal)}" required>
+      </label>
+      <label class="field">
+        <span class="field__label">Target completion</span>
+        <input class="input" type="date" name="targetDate" value="${esc(targetVal)}">
+      </label>
+      <div class="row">
+        <button class="btn btn--primary" type="submit">Save changes</button>
+        <a class="btn btn--ghost" href="/admin/projects">Cancel</a>
+      </div>
+    </form>
+  </section>`;
+}
+
+/* ── Obligation admin ────────────────────────────────────────────────────── */
+
+export function adminObligationsPage(data: {
+  csrf: string;
+  obligations: ObligationAdminRow[];
+  projects: Array<{ id: string; name: string; code: string; subsidiary_name: string }>;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const rows = data.obligations.length
+    ? data.obligations.map((o) => `<tr>
+        <td>
+          <a class="link" href="/admin/obligations/${esc(o.id)}/edit">${esc(o.title)}</a>
+          <span class="cell__sub">${esc(o.kind)}</span>
+        </td>
+        <td>${esc(o.project_name)}<span class="cell__sub">${esc(o.subsidiary_name)}</span></td>
+        <td>${statusTag(o.status)}</td>
+        <td class="num">${fmtDate(o.due_at)}</td>
+        <td>
+          <a class="btn btn--ghost btn--small" href="/admin/obligations/${esc(o.id)}/edit">Edit</a>
+        </td>
+      </tr>`).join('')
+    : `<tr><td colspan="5">${emptyState('No obligations', 'Add the first one.')}</td></tr>`;
+
+  const projOptions = data.projects.map((p) =>
+    `<option value="${esc(p.id)}">${esc(p.subsidiary_name)} — ${esc(p.name)} (${esc(p.code)})</option>`
+  ).join('');
+
+  const kindOptions = ['REGULATORY','BOARD','AUDIT','REPORT','TAX','LICENCE'].map((k) =>
+    `<option value="${k}">${k.toLowerCase()}</option>`
+  ).join('');
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-obs-admin">
+      <div class="panel__head">
+        <h2 id="h-obs-admin" class="panel__title">Obligations</h2>
+        <p class="panel__meta">${data.obligations.length} total</p>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Obligation</th>
+              <th scope="col">Project</th>
+              <th scope="col">Status</th>
+              <th scope="col" class="num">Due</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="h-new-ob">
+      <div class="panel__head">
+        <h2 id="h-new-ob" class="panel__title">Add obligation</h2>
+      </div>
+      <form method="post" action="/admin/obligations" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <label class="field">
+          <span class="field__label">Project <span aria-hidden="true">*</span></span>
+          <select class="input input--select" name="projectId" required>
+            <option value="">Select project</option>
+            ${projOptions}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Title <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="title" required minlength="3" maxlength="200">
+        </label>
+        <label class="field">
+          <span class="field__label">Kind <span aria-hidden="true">*</span></span>
+          <select class="input input--select" name="kind" required>
+            <option value="">Select kind</option>
+            ${kindOptions}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Due date <span aria-hidden="true">*</span></span>
+          <input class="input" type="date" name="dueAt" required>
+        </label>
+        <label class="field">
+          <span class="field__label">Owner name <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="ownerName" required minlength="2" maxlength="120">
+        </label>
+        <label class="field">
+          <span class="field__label">Requires documentary evidence</span>
+          <select class="input input--select" name="requiresDocument">
+            <option value="1" selected>Yes</option>
+            <option value="0">No</option>
+          </select>
+        </label>
+        <button class="btn btn--primary" type="submit">Add obligation</button>
+      </form>
+    </section>
+  </div>`;
+}
+
+export function adminObligationEditPage(data: {
+  csrf: string;
+  obligation: ObligationAdminRow;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const o = data.obligation;
+  const dueVal = o.due_at ? new Date(o.due_at).toISOString().slice(0, 10) : '';
+
+  const kindOptions = ['REGULATORY','BOARD','AUDIT','REPORT','TAX','LICENCE'].map((k) =>
+    `<option value="${k}" ${o.kind === k ? 'selected' : ''}>${k.toLowerCase()}</option>`
+  ).join('');
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a class="link" href="/admin/obligations">Obligations</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">${esc(o.title)}</span>
+  </nav>
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-edit-ob">
+      <div class="panel__head">
+        <h2 id="h-edit-ob" class="panel__title">Edit obligation</h2>
+        <p class="panel__meta">${esc(o.project_name)} · ${esc(o.subsidiary_name)}</p>
+      </div>
+      <form method="post" action="/admin/obligations/${esc(o.id)}" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <input type="hidden" name="_method" value="PUT">
+        <label class="field">
+          <span class="field__label">Title <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="title" value="${esc(o.title)}" required minlength="3" maxlength="200">
+        </label>
+        <label class="field">
+          <span class="field__label">Kind <span aria-hidden="true">*</span></span>
+          <select class="input input--select" name="kind" required>${kindOptions}</select>
+        </label>
+        <label class="field">
+          <span class="field__label">Due date <span aria-hidden="true">*</span></span>
+          <input class="input" type="date" name="dueAt" value="${esc(dueVal)}" required>
+        </label>
+        <label class="field">
+          <span class="field__label">Owner name <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="ownerName" value="${esc(o.owner_name)}" required minlength="2" maxlength="120">
+        </label>
+        <label class="field">
+          <span class="field__label">Requires documentary evidence</span>
+          <select class="input input--select" name="requiresDocument">
+            <option value="1" ${o.requires_document ? 'selected' : ''}>Yes</option>
+            <option value="0" ${!o.requires_document ? 'selected' : ''}>No</option>
+          </select>
+        </label>
+        <div class="row">
+          <button class="btn btn--primary" type="submit">Save changes</button>
+          <a class="btn btn--ghost" href="/admin/obligations">Cancel</a>
+        </div>
+      </form>
+    </section>
+    <section class="panel" aria-labelledby="h-ob-status">
+      <div class="panel__head">
+        <h2 id="h-ob-status" class="panel__title">Current status</h2>
+      </div>
+      <div class="panel__body">
+        <p class="prose">Current status: ${statusTag(o.status)}</p>
+        <p class="prose prose--muted">
+          To record a compliance outcome (completed, waived, reopen), use the
+          <a class="link" href="/obligations/${esc(o.id)}">obligation detail page</a>.
+          Status transitions are governed by the compliance workflow and are
+          tracked in the audit trail.
+        </p>
+      </div>
+    </section>
+  </div>`;
+}
+
+/* ── Admin hub page ──────────────────────────────────────────────────────── */
+
+export function adminHubPage(_csrf: string): string {
+  return `<section class="section" aria-labelledby="h-admin">
+    <div class="section__head">
+      <h2 id="h-admin" class="section__title">Administration</h2>
+      <p class="section__meta">Manage portfolio records and user accounts</p>
+    </div>
+    <div class="kpis kpis--four">
+      <a class="kpi kpi--link" href="/admin/users" style="text-decoration:none">
+        <p class="kpi__label">User accounts</p>
+        <p class="kpi__value">→</p>
+        <p class="kpi__detail">Create, edit, deactivate</p>
+      </a>
+      <a class="kpi kpi--link" href="/admin/subsidiaries" style="text-decoration:none">
+        <p class="kpi__label">Subsidiaries</p>
+        <p class="kpi__value">→</p>
+        <p class="kpi__detail">Add and edit group companies</p>
+      </a>
+      <a class="kpi kpi--link" href="/admin/projects" style="text-decoration:none">
+        <p class="kpi__label">Projects</p>
+        <p class="kpi__value">→</p>
+        <p class="kpi__detail">Add and edit portfolio projects</p>
+      </a>
+      <a class="kpi kpi--link" href="/admin/obligations" style="text-decoration:none">
+        <p class="kpi__label">Obligations</p>
+        <p class="kpi__value">→</p>
+        <p class="kpi__detail">Add and edit compliance obligations</p>
+      </a>
+    </div>
+  </section>`;
+}

@@ -28,6 +28,7 @@ import { decideApproval } from './agent.ts';
 import { ingestDocument, documentDetail, validateTextUpload } from './documents.ts';
 import * as portfolio from './portfolio.ts';
 import { sendTestNotification } from './notify.ts';
+import * as adminSvc from './admin.ts';
 import { layout, loginPage, esc, fmtDateTime, notice, titleCase } from './views/layout.ts';
 import {
   overviewPage,
@@ -43,6 +44,15 @@ import {
   alertPage,
   activityPage,
   errorPage,
+  adminHubPage,
+  adminUsersPage,
+  adminUserEditPage,
+  adminSubsidiariesPage,
+  adminSubsidiaryEditPage,
+  adminProjectsPage,
+  adminProjectEditPage,
+  adminObligationsPage,
+  adminObligationEditPage,
 } from './views/pages.ts';
 import { startScheduler } from './scheduler.ts';
 
@@ -564,6 +574,334 @@ app.get('/activity', async (req, reply) => {
       wide: true,
     }),
   );
+});
+
+/* Administration routes --------------------------------------------------- */
+
+function adminLayout(user: SessionUser, title: string, active: string, body: string, subtitle?: string) {
+  return layout({ user, title, active, body, subtitle });
+}
+
+app.get('/admin', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  return page(reply, adminLayout(user, 'Administration', 'admin', adminHubPage(user.csrfToken)));
+});
+
+/* ── User management ─────────────────────────────────────────────────────── */
+
+app.get('/admin/users', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const q = req.query as Record<string, string | undefined>;
+  const users = await adminSvc.listUsers();
+  const n = q.created ? { kind: 'ok' as const, text: 'User created.' }
+    : q.updated ? { kind: 'ok' as const, text: 'User updated.' }
+    : q.pwreset ? { kind: 'ok' as const, text: 'Password reset. All existing sessions for that user were invalidated.' }
+    : undefined;
+  return page(reply, adminLayout(user, 'Users', 'admin',
+    adminUsersPage({ csrf: user.csrfToken, users, notice: n }),
+    'Manage application user accounts',
+  ));
+});
+
+app.post('/admin/users', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.createUser({
+    email: String(body.email ?? ''),
+    name: String(body.name ?? ''),
+    role: String(body.role ?? '') as 'EXEC' | 'COMPLIANCE' | 'ADMIN',
+    password: String(body.password ?? ''),
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect('/admin/users?created=1');
+  const users = await adminSvc.listUsers();
+  return page(reply, adminLayout(user, 'Users', 'admin',
+    adminUsersPage({ csrf: user.csrfToken, users, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+app.get('/admin/users/:id/edit', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const target = await adminSvc.getUser(id);
+  if (!target) throw new HttpError(404, 'User not found.');
+  const q = req.query as Record<string, string | undefined>;
+  const n = q.updated ? { kind: 'ok' as const, text: 'Changes saved.' }
+    : q.pwreset ? { kind: 'ok' as const, text: 'Password reset successfully.' }
+    : undefined;
+  return page(reply, adminLayout(user, target.name, 'admin',
+    adminUserEditPage({ csrf: user.csrfToken, user: target, isSelf: target.id === user.id, notice: n }),
+  ));
+});
+
+app.post('/admin/users/:id', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.updateUser({
+    id,
+    name: String(body.name ?? ''),
+    role: String(body.role ?? '') as 'EXEC' | 'COMPLIANCE' | 'ADMIN',
+    is_active: body.is_active === '1',
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect(`/admin/users/${id}/edit?updated=1`);
+  const target = await adminSvc.getUser(id);
+  if (!target) throw new HttpError(404, 'User not found.');
+  return page(reply, adminLayout(user, target.name, 'admin',
+    adminUserEditPage({ csrf: user.csrfToken, user: target, isSelf: target.id === user.id, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+app.post('/admin/users/:id/password', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.setUserPassword({
+    userId: id,
+    newPassword: String(body.password ?? ''),
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect(`/admin/users/${id}/edit?pwreset=1`);
+  const target = await adminSvc.getUser(id);
+  if (!target) throw new HttpError(404, 'User not found.');
+  return page(reply, adminLayout(user, target.name, 'admin',
+    adminUserEditPage({ csrf: user.csrfToken, user: target, isSelf: target.id === user.id, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+/* ── Subsidiary admin ─────────────────────────────────────────────────────── */
+
+app.get('/admin/subsidiaries', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const q = req.query as Record<string, string | undefined>;
+  const subs = await adminSvc.listSubsidiariesAdmin();
+  const n = q.created ? { kind: 'ok' as const, text: 'Subsidiary added.' }
+    : q.updated ? { kind: 'ok' as const, text: 'Changes saved.' }
+    : undefined;
+  return page(reply, adminLayout(user, 'Subsidiaries', 'admin',
+    adminSubsidiariesPage({ csrf: user.csrfToken, subsidiaries: subs, notice: n }),
+    'Add and edit group companies',
+  ));
+});
+
+app.post('/admin/subsidiaries', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.createSubsidiary({
+    code: String(body.code ?? ''),
+    name: String(body.name ?? ''),
+    sector: String(body.sector ?? ''),
+    description: String(body.description ?? ''),
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect('/admin/subsidiaries?created=1');
+  const subs = await adminSvc.listSubsidiariesAdmin();
+  return page(reply, adminLayout(user, 'Subsidiaries', 'admin',
+    adminSubsidiariesPage({ csrf: user.csrfToken, subsidiaries: subs, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+app.get('/admin/subsidiaries/:id/edit', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const subs = await adminSvc.listSubsidiariesAdmin();
+  const sub = subs.find((s) => s.id === id);
+  if (!sub) throw new HttpError(404, 'Subsidiary not found.');
+  const q = req.query as Record<string, string | undefined>;
+  const n = q.updated ? { kind: 'ok' as const, text: 'Changes saved.' } : undefined;
+  return page(reply, adminLayout(user, sub.name, 'admin',
+    adminSubsidiaryEditPage({ csrf: user.csrfToken, subsidiary: sub, notice: n }),
+  ));
+});
+
+app.post('/admin/subsidiaries/:id', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.updateSubsidiary({
+    id,
+    name: String(body.name ?? ''),
+    sector: String(body.sector ?? ''),
+    description: String(body.description ?? ''),
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect(`/admin/subsidiaries/${id}/edit?updated=1`);
+  const subs = await adminSvc.listSubsidiariesAdmin();
+  const sub = subs.find((s) => s.id === id);
+  if (!sub) throw new HttpError(404, 'Subsidiary not found.');
+  return page(reply, adminLayout(user, sub.name, 'admin',
+    adminSubsidiaryEditPage({ csrf: user.csrfToken, subsidiary: sub, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+/* ── Project admin ───────────────────────────────────────────────────────── */
+
+app.get('/admin/projects', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const q = req.query as Record<string, string | undefined>;
+  const [projects, subs] = await Promise.all([adminSvc.listProjectsAdmin(), adminSvc.subsidiarySelectorOptions()]);
+  const n = q.created ? { kind: 'ok' as const, text: 'Project added.' }
+    : q.updated ? { kind: 'ok' as const, text: 'Changes saved.' }
+    : undefined;
+  return page(reply, adminLayout(user, 'Projects', 'admin',
+    adminProjectsPage({ csrf: user.csrfToken, projects, subsidiaries: subs, notice: n }),
+    'Add and edit portfolio projects',
+  ));
+});
+
+app.post('/admin/projects', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.createProject({
+    subsidiaryId: String(body.subsidiaryId ?? ''),
+    code: String(body.code ?? ''),
+    name: String(body.name ?? ''),
+    status: String(body.status ?? 'ACTIVE'),
+    budgetNgn: String(body.budgetNgn ?? ''),
+    startDate: String(body.startDate ?? ''),
+    targetDate: String(body.targetDate ?? ''),
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect('/admin/projects?created=1');
+  const [projects, subs] = await Promise.all([adminSvc.listProjectsAdmin(), adminSvc.subsidiarySelectorOptions()]);
+  return page(reply, adminLayout(user, 'Projects', 'admin',
+    adminProjectsPage({ csrf: user.csrfToken, projects, subsidiaries: subs, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+app.get('/admin/projects/:id/edit', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const projects = await adminSvc.listProjectsAdmin();
+  const proj = projects.find((p) => p.id === id);
+  if (!proj) throw new HttpError(404, 'Project not found.');
+  // Fetch full date fields for the edit form
+  const full = await adminSvc.getProjectDates(id);
+  const q = req.query as Record<string, string | undefined>;
+  const n = q.updated ? { kind: 'ok' as const, text: 'Changes saved.' } : undefined;
+  return page(reply, adminLayout(user, proj.name, 'admin',
+    adminProjectEditPage({ csrf: user.csrfToken, project: { ...proj, ...full! }, notice: n }),
+  ));
+});
+
+app.post('/admin/projects/:id', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.updateProject({
+    id,
+    name: String(body.name ?? ''),
+    status: String(body.status ?? ''),
+    budgetNgn: String(body.budgetNgn ?? ''),
+    startDate: String(body.startDate ?? ''),
+    targetDate: String(body.targetDate ?? ''),
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect(`/admin/projects/${id}/edit?updated=1`);
+  const projects = await adminSvc.listProjectsAdmin();
+  const proj = projects.find((p) => p.id === id);
+  if (!proj) throw new HttpError(404, 'Project not found.');
+  const full = await adminSvc.getProjectDates(id);
+  return page(reply, adminLayout(user, proj.name, 'admin',
+    adminProjectEditPage({ csrf: user.csrfToken, project: { ...proj, ...full! }, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+/* ── Obligation admin ────────────────────────────────────────────────────── */
+
+app.get('/admin/obligations', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const q = req.query as Record<string, string | undefined>;
+  const [obligations, projs] = await Promise.all([adminSvc.listObligationsAdmin(), adminSvc.projectSelectorOptions()]);
+  const n = q.created ? { kind: 'ok' as const, text: 'Obligation added.' }
+    : q.updated ? { kind: 'ok' as const, text: 'Changes saved.' }
+    : undefined;
+  return page(reply, adminLayout(user, 'Obligations', 'admin',
+    adminObligationsPage({ csrf: user.csrfToken, obligations, projects: projs, notice: n }),
+    'Add and edit compliance obligations',
+  ));
+});
+
+app.post('/admin/obligations', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.createObligation({
+    projectId: String(body.projectId ?? ''),
+    title: String(body.title ?? ''),
+    kind: String(body.kind ?? ''),
+    dueAt: String(body.dueAt ?? ''),
+    ownerName: String(body.ownerName ?? ''),
+    requiresDocument: body.requiresDocument !== '0',
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect('/admin/obligations?created=1');
+  const [obligations, projs] = await Promise.all([adminSvc.listObligationsAdmin(), adminSvc.projectSelectorOptions()]);
+  return page(reply, adminLayout(user, 'Obligations', 'admin',
+    adminObligationsPage({ csrf: user.csrfToken, obligations, projects: projs, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+app.get('/admin/obligations/:id/edit', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const obligations = await adminSvc.listObligationsAdmin();
+  const ob = obligations.find((o) => o.id === id);
+  if (!ob) throw new HttpError(404, 'Obligation not found.');
+  const q = req.query as Record<string, string | undefined>;
+  const n = q.updated ? { kind: 'ok' as const, text: 'Changes saved.' } : undefined;
+  return page(reply, adminLayout(user, ob.title, 'admin',
+    adminObligationEditPage({ csrf: user.csrfToken, obligation: ob, notice: n }),
+  ));
+});
+
+app.post('/admin/obligations/:id', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await adminSvc.updateObligation({
+    id,
+    title: String(body.title ?? ''),
+    kind: String(body.kind ?? ''),
+    dueAt: String(body.dueAt ?? ''),
+    ownerName: String(body.ownerName ?? ''),
+    requiresDocument: body.requiresDocument !== '0',
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect(`/admin/obligations/${id}/edit?updated=1`);
+  const obligations = await adminSvc.listObligationsAdmin();
+  const ob = obligations.find((o) => o.id === id);
+  if (!ob) throw new HttpError(404, 'Obligation not found.');
+  return page(reply, adminLayout(user, ob.title, 'admin',
+    adminObligationEditPage({ csrf: user.csrfToken, obligation: ob, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
 });
 
 /* Admin / development routes --------------------------------------------- */
