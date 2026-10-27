@@ -150,11 +150,12 @@ export async function recentAgentActivity(limit = 6): Promise<
 }
 
 export async function subsidiaries(): Promise<
-  Array<{ id: string; name: string; code: string; sector: string; description: string; projects: string; overdue: string }>
+  Array<{ id: string; name: string; code: string; sector: string; description: string; projects: string; obligations: string; overdue: string }>
 > {
   return many(`
     SELECT s.id, s.name, s.code, s.sector, s.description,
            (SELECT count(*) FROM project p WHERE p.subsidiary_id = s.id)::text AS projects,
+           (SELECT count(*) FROM obligation o JOIN project p ON p.id = o.project_id WHERE p.subsidiary_id = s.id)::text AS obligations,
            (SELECT count(*) FROM obligation o JOIN project p ON p.id = o.project_id WHERE p.subsidiary_id = s.id AND o.status = 'OVERDUE')::text AS overdue
       FROM subsidiary s ORDER BY s.name
   `);
@@ -393,5 +394,86 @@ export async function obligationOptions(): Promise<Array<{ id: string; title: st
     `SELECT o.id, o.title, s.name AS subsidiary_name, o.status::text AS status
        FROM obligation o JOIN project p ON p.id = o.project_id JOIN subsidiary s ON s.id = p.subsidiary_id
       WHERE o.status IN ('OPEN','OVERDUE','SUBMITTED') ORDER BY o.due_at`,
+  );
+}
+
+export interface ObligationBreakdown {
+  open: number;
+  overdue: number;
+  submitted: number;
+  completed: number;
+  waived: number;
+}
+
+/** Counts obligations by status for the overview chart.
+ *  Returns zeroes rather than missing keys when a status has no records. */
+export async function obligationStatusBreakdown(): Promise<ObligationBreakdown> {
+  const rows = await many<{ status: string; cnt: string }>(
+    `SELECT status::text, count(*)::text AS cnt
+       FROM obligation
+      GROUP BY status`,
+  );
+  const map: Record<string, number> = {};
+  for (const r of rows) map[r.status] = Number(r.cnt);
+  return {
+    open:      map['OPEN']      ?? 0,
+    overdue:   map['OVERDUE']   ?? 0,
+    submitted: map['SUBMITTED'] ?? 0,
+    completed: map['COMPLETED'] ?? 0,
+    waived:    map['WAIVED']    ?? 0,
+  };
+}
+
+export interface AlertSeverityBreakdown {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+/** Counts open/escalated alerts by severity for the overview chart. */
+export async function alertSeverityBreakdown(): Promise<AlertSeverityBreakdown> {
+  const rows = await many<{ severity: string; cnt: string }>(
+    `SELECT severity::text, count(*)::text AS cnt
+       FROM alert
+      WHERE status NOT IN ('RESOLVED', 'DISMISSED')
+      GROUP BY severity`,
+  );
+  const map: Record<string, number> = {};
+  for (const r of rows) map[r.severity] = Number(r.cnt);
+  return {
+    critical: map['CRITICAL'] ?? 0,
+    high:     map['HIGH']     ?? 0,
+    medium:   map['MEDIUM']   ?? 0,
+    low:      map['LOW']      ?? 0,
+  };
+}
+
+export interface PendingApproval {
+  id: string;
+  alert_id: string;
+  alert_type: string;
+  severity: string;
+  subsidiary_name: string;
+  obligation_title: string | null;
+  proposed_action: string;
+  created_at: Date;
+}
+
+/** Fetches approvals currently awaiting a decision, most urgent first. */
+export async function pendingApprovals(limit = 8): Promise<PendingApproval[]> {
+  return many<PendingApproval>(
+    `SELECT a.id, a.alert_id, al.type AS alert_type, al.severity,
+            s.name AS subsidiary_name, o.title AS obligation_title,
+            a.proposed_action, a.created_at
+       FROM approval a
+       JOIN alert al ON al.id = a.alert_id
+       JOIN subsidiary s ON s.id = al.subsidiary_id
+       LEFT JOIN obligation o ON o.id = al.obligation_id
+      WHERE a.status = 'PENDING'
+      ORDER BY CASE al.severity WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,
+               a.created_at ASC
+      LIMIT $1`,
+    [limit],
   );
 }

@@ -230,12 +230,15 @@ app.post('/logout', async (req, reply) => {
 
 app.get('/', async (req, reply) => {
   const user = requireUser(await currentUser(req));
-  const [kpis, subs, upcoming, alerts, runs] = await Promise.all([
+  const [kpis, subs, upcoming, alerts, runs, obligationBreakdown, alertBreakdown, pendingApprovals] = await Promise.all([
     portfolio.dashboardKpis(),
     portfolio.subsidiaryPerformance(),
-    portfolio.upcomingObligations(8),
-    portfolio.recentAlerts(6),
-    portfolio.recentAgentActivity(6),
+    portfolio.upcomingObligations(10),
+    portfolio.recentAlerts(5),
+    portfolio.recentAgentActivity(5),
+    portfolio.obligationStatusBreakdown(),
+    portfolio.alertSeverityBreakdown(),
+    portfolio.pendingApprovals(6),
   ]);
   const checkedAt = kpis.lastCheckAt ? fmtDateTime(kpis.lastCheckAt) : 'not run yet';
   return page(
@@ -252,6 +255,9 @@ app.get('/', async (req, reply) => {
         upcoming,
         alerts,
         runs,
+        obligationBreakdown,
+        alertBreakdown,
+        pendingApprovals,
         canRun: can(user, 'run_check'),
         checkedAt,
       }),
