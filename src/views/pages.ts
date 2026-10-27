@@ -202,6 +202,8 @@ export function overviewPage(data: {
   pendingApprovals: PendingApproval[];
   canRun: boolean;
   checkedAt: string;
+  modelConfigured: boolean;
+  emailConfigured: boolean;
 }): string {
   const k = data.kpis;
   const ob = data.obligationBreakdown;
@@ -216,14 +218,14 @@ export function overviewPage(data: {
       <p class="section__meta">Last compliance sweep: ${esc(data.checkedAt)}</p>
     </div>
     <div class="kpis">
-      ${kpi('Subsidiaries',          String(k.subsidiaries),        'Group companies')}
-      ${kpi('Active projects',       String(k.activeProjects),      'In flight across the portfolio')}
-      ${kpi('Total obligations',     String(k.totalObligations),    `${k.completedObligations} completed · ${k.dueNext7Days} due within 7 days`)}
-      ${kpi('Overdue obligations',   String(k.overdueObligations),  'Past due and still open',
+      ${kpi('Subsidiaries',            String(k.subsidiaries),          'Group companies')}
+      ${kpi('Active projects',         String(k.activeProjects),        'In flight across the portfolio')}
+      ${kpi('Total obligations',       String(k.totalObligations),      `${k.completedObligations} completed · ${k.dueNext7Days} due within 7 days`)}
+      ${kpi('Overdue obligations',     String(k.overdueObligations),    'Past due and still open',
              k.overdueObligations > 0 ? 'critical' : undefined)}
-      ${kpi('High-priority risks',   String(k.highRisks),           'Open, high or critical severity',
-             k.highRisks > 0 ? 'warn' : undefined)}
-      ${kpi('Open alerts',           String(k.openAlerts),          'Requiring attention or approval',
+      ${kpi('Projects past target',    String(k.projectsAtScheduleRisk), 'Active projects past target date',
+             k.projectsAtScheduleRisk > 0 ? 'warn' : undefined)}
+      ${kpi('Open alerts',             String(k.openAlerts),            'Requiring attention or approval',
              k.openAlerts > 0 ? 'warn' : undefined)}
     </div>
   </section>`;
@@ -420,7 +422,64 @@ export function overviewPage(data: {
     </section>
   </div>`;
 
-  return kpiRow + analyticsRow + actionQueue + bottomRow;
+  /* ── System status panel ────────────────────────────────────────────────
+   * Shows AI and notification configuration state honestly.
+   * Never claims capabilities that are not verified/configured.
+   * ───────────────────────────────────────────────────────────────────── */
+
+  const aiStatusTag  = data.modelConfigured
+    ? `<span class="tag tag--ok"><span class="tag__dot" aria-hidden="true"></span>Configured</span>`
+    : `<span class="tag tag--muted"><span class="tag__dot" aria-hidden="true"></span>Not configured</span>`;
+
+  const emailStatusTag = data.emailConfigured
+    ? `<span class="tag tag--ok"><span class="tag__dot" aria-hidden="true"></span>Configured</span>`
+    : `<span class="tag tag--muted"><span class="tag__dot" aria-hidden="true"></span>Not configured</span>`;
+
+  const statusPanel = `
+  <section class="panel" aria-labelledby="h-sys-status">
+    <div class="panel__head">
+      <h2 id="h-sys-status" class="panel__title">System capabilities</h2>
+      <p class="panel__meta">What is active in this instance</p>
+    </div>
+    <div class="panel__body">
+      <dl class="facts">
+        <div>
+          <dt>AI assessment</dt>
+          <dd>${aiStatusTag}
+            <span class="cell__sub">
+              ${data.modelConfigured
+                ? 'Document analysis and escalation drafts use a language model.'
+                : 'Set AI_PROVIDER and AI_API_KEY in .env to enable model-assisted assessment.'}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Critical notifications</dt>
+          <dd>${emailStatusTag}
+            <span class="cell__sub">
+              ${data.emailConfigured
+                ? 'SMTP delivery is configured. Critical alerts will generate email notifications.'
+                : 'Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env to enable email delivery.'}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Compliance monitoring</dt>
+          <dd><span class="tag tag--ok"><span class="tag__dot" aria-hidden="true"></span>Active</span>
+            <span class="cell__sub">Obligation deadlines, evidence, schedule, and document inconsistencies checked every 15 minutes.</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Human approval required</dt>
+          <dd><span class="tag tag--info"><span class="tag__dot" aria-hidden="true"></span>Enforced</span>
+            <span class="cell__sub">HIGH and CRITICAL alerts require an authorised reviewer before any escalation is sent.</span>
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </section>`;
+
+  return kpiRow + analyticsRow + actionQueue + bottomRow + statusPanel;
 }
 
 /* =========================================================================

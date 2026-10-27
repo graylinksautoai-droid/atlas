@@ -10,6 +10,7 @@ export interface Kpis {
   dueNext7Days: number;
   totalObligations: number;
   completedObligations: number;
+  projectsAtScheduleRisk: number;
   lastCheckAt: Date | null;
   lastCheckStatus: string | null;
 }
@@ -24,6 +25,7 @@ export async function dashboardKpis(): Promise<Kpis> {
     due_7: string;
     total: string;
     completed: string;
+    schedule_risk: string;
     last_check_at: Date | null;
     last_check_status: string | null;
   }>(`
@@ -36,6 +38,7 @@ export async function dashboardKpis(): Promise<Kpis> {
       (SELECT count(*) FROM obligation WHERE status IN ('OPEN','OVERDUE') AND due_at BETWEEN now() AND now() + interval '7 days')::text AS due_7,
       (SELECT count(*) FROM obligation WHERE status <> 'WAIVED')::text AS total,
       (SELECT count(*) FROM obligation WHERE status = 'COMPLETED')::text AS completed,
+      (SELECT count(*) FROM project WHERE status IN ('ACTIVE','AT_RISK') AND target_date IS NOT NULL AND target_date < current_date)::text AS schedule_risk,
       (SELECT started_at FROM compliance_check ORDER BY started_at DESC LIMIT 1) AS last_check_at,
       (SELECT status FROM compliance_check ORDER BY started_at DESC LIMIT 1) AS last_check_status
   `);
@@ -50,6 +53,7 @@ export async function dashboardKpis(): Promise<Kpis> {
     dueNext7Days: Number(row?.due_7 ?? 0),
     totalObligations: total,
     completedObligations: completed,
+    projectsAtScheduleRisk: Number(row?.schedule_risk ?? 0),
     complianceRate: total === 0 ? 0 : Math.round((completed / total) * 1000) / 10,
     lastCheckAt: row?.last_check_at ?? null,
     lastCheckStatus: row?.last_check_status ?? null,

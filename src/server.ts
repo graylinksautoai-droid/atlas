@@ -252,6 +252,10 @@ app.get('/', async (req, reply) => {
     portfolio.pendingApprovals(6),
   ]);
   const checkedAt = kpis.lastCheckAt ? fmtDateTime(kpis.lastCheckAt) : 'not run yet';
+  // Email is configured only when all three SMTP credentials are present.
+  const emailConfigured = Boolean(
+    process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS,
+  );
   return page(
     reply,
     layout({
@@ -271,6 +275,8 @@ app.get('/', async (req, reply) => {
         pendingApprovals,
         canRun: can(user, 'run_check'),
         checkedAt,
+        modelConfigured,
+        emailConfigured,
       }),
     }),
   );

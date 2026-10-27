@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto';
 
 export type ObligationState = 'OPEN' | 'SUBMITTED' | 'OVERDUE' | 'COMPLETED' | 'WAIVED';
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-export type AlertType = 'OVERDUE_OBLIGATION' | 'DUE_SOON' | 'MISSING_DOCUMENT' | 'DOCUMENT_INCONSISTENCY';
+export type AlertType =
+  | 'OVERDUE_OBLIGATION'
+  | 'DUE_SOON'
+  | 'MISSING_DOCUMENT'
+  | 'DOCUMENT_INCONSISTENCY'
+  | 'AT_RISK_SCHEDULE';
 
 export interface ObligationRow {
   id: string;
@@ -70,6 +75,25 @@ export function stateFingerprint(row: { id: string; status: string; due_at: Date
 
 export function escalationRequired(severity: Severity): boolean {
   return severity === 'HIGH' || severity === 'CRITICAL';
+}
+
+/**
+ * Severity for a project that has passed its target_date.
+ * Based on how many days past target, regardless of obligation status.
+ */
+export function severityForScheduleRisk(daysLate: number): Severity {
+  if (daysLate >= 60) return 'CRITICAL';
+  if (daysLate >= 14) return 'HIGH';
+  if (daysLate >= 3)  return 'MEDIUM';
+  return 'LOW';
+}
+
+/**
+ * Dedupe key for project schedule risk alerts.
+ * Uses project_id, not obligation_id, since these are project-level.
+ */
+export function scheduleDedupeKey(projectId: string): string {
+  return `AT_RISK_SCHEDULE:${projectId}`;
 }
 
 /** Sections a submission of each kind must contain to count as complete. */

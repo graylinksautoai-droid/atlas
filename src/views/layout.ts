@@ -162,7 +162,7 @@ export function layout(input: {
   <div class="main">
     <header class="topbar">
       <div class="topbar__left">
-        <p class="topbar__eyebrow">Portfolio intelligence &amp; compliance</p>
+        <p class="topbar__eyebrow">AI-Powered Executive &amp; Portfolio Intelligence</p>
         <h1 class="topbar__title">${esc(input.title)}</h1>
         ${input.subtitle ? `<p class="topbar__sub">${esc(input.subtitle)}</p>` : ''}
       </div>

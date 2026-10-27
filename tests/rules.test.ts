@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { daysOverdue, dedupeKey, severityForDueSoon, severityForOverdue, stateFingerprint, missingSections, escalationRequired } from '../src/rules.ts';
+import { daysOverdue, dedupeKey, severityForDueSoon, severityForOverdue, stateFingerprint, missingSections, escalationRequired, severityForScheduleRisk, scheduleDedupeKey } from '../src/rules.ts';
 import { validateTextUpload, decodeText } from '../src/documents.ts';
 import { documentAnalysisSchema, escalationDraftSchema, deterministicEscalation } from '../src/ai.ts';
 
@@ -104,4 +104,23 @@ test('deterministic fallback is always well formed and labelled as policy text',
   assert.equal(escalationDraftSchema.safeParse(draft).success, true);
   assert.match(draft.body, /deterministic policy rules/);
   assert.match(draft.body, /21 day/);
+});
+
+test('schedule risk severity follows documented thresholds', () => {
+  assert.equal(severityForScheduleRisk(1),   'LOW',      '1 day late → LOW');
+  assert.equal(severityForScheduleRisk(2),   'LOW',      '2 days late → LOW');
+  assert.equal(severityForScheduleRisk(3),   'MEDIUM',   '3 days late → MEDIUM');
+  assert.equal(severityForScheduleRisk(13),  'MEDIUM',   '13 days late → MEDIUM');
+  assert.equal(severityForScheduleRisk(14),  'HIGH',     '14 days late → HIGH');
+  assert.equal(severityForScheduleRisk(59),  'HIGH',     '59 days late → HIGH');
+  assert.equal(severityForScheduleRisk(60),  'CRITICAL', '60 days late → CRITICAL');
+  assert.equal(severityForScheduleRisk(365), 'CRITICAL', '365 days late → CRITICAL');
+});
+
+test('schedule dedupe key is stable and distinct from obligation keys', () => {
+  const projectId = '3f0f4a62-0000-4000-8000-000000000099';
+  const key = scheduleDedupeKey(projectId);
+  assert.equal(key, `AT_RISK_SCHEDULE:${projectId}`);
+  // Must not collide with an OVERDUE_OBLIGATION key for the same UUID
+  assert.notEqual(key, dedupeKey('OVERDUE_OBLIGATION', projectId));
 });

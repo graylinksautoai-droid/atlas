@@ -7,6 +7,8 @@ import {
   dedupeKey,
   severityForDueSoon,
   severityForOverdue,
+  severityForScheduleRisk,
+  scheduleDedupeKey,
   stateFingerprint,
   type ObligationRow,
   type Severity,
@@ -122,6 +124,11 @@ export async function runComplianceCheck(opts: {
         );
       }
     }
+
+    // Check project schedule risks (projects past target_date while still ACTIVE or AT_RISK).
+    // This runs once per compliance sweep, separate from the per-obligation loop.
+    const scheduleAlerts = await checkProjectSchedules(now, checkId);
+    alertsCreated += scheduleAlerts;
 
     await client.query(
       `UPDATE compliance_check
@@ -388,3 +395,121 @@ export async function countActiveAlerts(): Promise<number> {
 }
 
 export { query as rawQuery };
+
+/**
+ * Scans all projects with a non-null target_date that have passed it while
+ * status is still ACTIVE or AT_RISK. Raises (or refreshes) one
+ * AT_RISK_SCHEDULE alert per affected project.
+ *
+ * Returns the count of newly created alerts.
+ *
+ * This runs at most once per compliance sweep, outside the per-obligation
+ * transaction, so it never holds an obligation row lock.
+ */
+async function checkProjectSchedules(now: Date, checkId: string | null): Promise<number> {
+  const projects = await many<{
+    id: string;
+    code: string;
+    name: string;
+    status: string;
+    target_date: Date;
+    subsidiary_id: string;
+    subsidiary_name: string;
+    budget_ngn: string | null;
+  }>(
+    `SELECT p.id, p.code, p.name, p.status::text, p.target_date,
+            p.subsidiary_id, s.name AS subsidiary_name, p.budget_ngn::text
+       FROM project p
+       JOIN subsidiary s ON s.id = p.subsidiary_id
+      WHERE p.status IN ('ACTIVE', 'AT_RISK')
+        AND p.target_date IS NOT NULL
+        AND p.target_date < $1::date`,
+    [now.toISOString().slice(0, 10)],
+  );
+
+  let created = 0;
+
+  for (const proj of projects) {
+    const daysLate = Math.floor(
+      (now.getTime() - new Date(proj.target_date).getTime()) / 86_400_000,
+    );
+    if (daysLate <= 0) continue;
+
+    const severity = severityForScheduleRisk(daysLate);
+    const key = scheduleDedupeKey(proj.id);
+    const evidence =
+      `Project ${proj.name} (${proj.code}, ${proj.subsidiary_name}) passed its target ` +
+      `completion date of ${new Date(proj.target_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })} ` +
+      `and is ${daysLate} day(s) late. Current status: ${proj.status}.`;
+    const action =
+      severity === 'CRITICAL' || severity === 'HIGH'
+        ? 'Review project status with the subsidiary lead and provide a revised completion plan.'
+        : 'Update project status and confirm a revised target date with the project owner.';
+
+    try {
+      await tx(async (client: Tx) => {
+        const existing = await client.query<{ id: string }>(
+          `SELECT id FROM alert
+            WHERE dedupe_key = $1
+              AND status NOT IN ('RESOLVED','DISMISSED')
+            LIMIT 1`,
+          [key],
+        );
+        if (existing.rows.length > 0) {
+          await client.query(
+            `UPDATE alert
+                SET evidence_summary = $2, recommended_action = $3, severity = $4, updated_at = now()
+              WHERE id = $1`,
+            [existing.rows[0].id, evidence, action, severity],
+          );
+          return;
+        }
+
+        let alertId: string;
+        try {
+          const ins = await client.query<{ id: string }>(
+            `INSERT INTO alert
+               (type, severity, subsidiary_id, project_id, dedupe_key, evidence_summary, recommended_action)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id`,
+            ['AT_RISK_SCHEDULE', severity, proj.subsidiary_id, proj.id, key, evidence, action],
+          );
+          alertId = ins.rows[0].id;
+        } catch (err) {
+          if ((err as { code?: string }).code === '23505') return;
+          throw err;
+        }
+
+        await audit(
+          {
+            actorType: 'SYSTEM',
+            action: 'alert.created',
+            entityType: 'alert',
+            entityId: alertId,
+            detail: { type: 'AT_RISK_SCHEDULE', severity, projectId: proj.id, checkId },
+          },
+          client,
+        );
+        created += 1;
+
+        // Notify for critical schedule slippage — same fire-and-forget pattern
+        if (severity === 'CRITICAL') {
+          notifyCriticalAlert({
+            alertId,
+            alertType: 'AT_RISK_SCHEDULE',
+            severity: 'CRITICAL',
+            subsidiaryName: proj.subsidiary_name,
+            obligationTitle: proj.name,
+            evidenceSummary: evidence,
+            recommendedAction: action,
+            dueAt: new Date(proj.target_date),
+          }).catch(() => undefined);
+        }
+      });
+    } catch {
+      // One project error must not abort the rest of the schedule check.
+    }
+  }
+
+  return created;
+}
