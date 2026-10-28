@@ -148,7 +148,7 @@ function buildEmail(n: CriticalAlertNotification, recipients: string[], from: st
   const subject = `[ATLAS CRITICAL] ${n.obligationTitle ?? n.alertType} — ${n.subsidiaryName}`;
   const aiSection = n.aiSummary
     ? `\n— AI-GENERATED SUMMARY (model: ${n.aiModel ?? 'unknown'}) —\n${n.aiSummary}\n(This content was produced by a language model and requires human verification.)`
-    : '\n— AI SUMMARY UNAVAILABLE —\nNo model is configured. Deterministic findings only.';
+    : '\n— AI SUMMARY NOT INCLUDED —\nNo AI-generated summary was included with this notification. Deterministic findings only.';
 
   const body = [
     `ATLAS CRITICAL ALERT NOTIFICATION`,

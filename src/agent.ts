@@ -23,7 +23,7 @@ export interface AlertContext {
  * write to the database except through the functions in this module, and it can
  * never execute an action: only a human approval unlocks execution.
  */
-export async function handleAlert(input: AlertContext): Promise<{ runId: string; approvalId: string | null }> {
+export async function handleAlert(input: AlertContext): Promise<{ runId: string; approvalId: string | null; escalationRationale: string | null; escalationModel: string | null }> {
   const run = await one<{ id: string }>(
     `INSERT INTO agent_run (trigger, status, evidence, check_id, alert_id)
      VALUES ($1, 'RUNNING', $2, $3, $4) RETURNING id`,
@@ -171,7 +171,7 @@ export async function handleAlert(input: AlertContext): Promise<{ runId: string;
     detail: { status: degraded ? 'DEGRADED' : 'OK', alertId: input.alertId, approvalId, model: model ?? 'deterministic-rules' },
   });
 
-  return { runId, approvalId };
+  return { runId, approvalId, escalationRationale: requiresApproval ? draft.rationale : null, escalationModel: degraded ? null : model };
 }
 
 export type ApprovalOutcome = 'EXECUTED' | 'REJECTED' | 'EXPIRED' | 'CONFLICT' | 'NOT_FOUND';

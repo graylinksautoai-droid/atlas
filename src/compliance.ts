@@ -266,7 +266,7 @@ async function evaluateObligation(
         `SELECT status::text AS status, version, updated_at FROM obligation WHERE id = $1`,
         [row.id],
       );
-      await handleAlert({
+      const agentResult = await handleAlert({
         alertId: result.alertId,
         alertType: candidate.type,
         severity: candidate.severity,
@@ -277,9 +277,29 @@ async function evaluateObligation(
         checkId,
       });
       runs += 1;
+
+      // If the agent produced an AI-generated rationale, include it in the
+      // critical notification so recipients get the model's assessment.
+      // The escalation body itself remains subject to human approval.
+      if (result.alertId && candidate.severity === 'CRITICAL') {
+        notifyCriticalAlert({
+          alertId: result.alertId,
+          alertType: candidate.type,
+          severity: 'CRITICAL',
+          subsidiaryName: row.subsidiary_name,
+          obligationTitle: row.title,
+          evidenceSummary: candidate.evidence,
+          recommendedAction: candidate.action,
+          dueAt: row.due_at,
+          aiSummary: agentResult.escalationRationale ?? undefined,
+          aiModel: agentResult.escalationModel ?? undefined,
+        }).catch(() => undefined);
+      }
+      continue;
     }
-    // Fire a critical notification for new CRITICAL alerts (fire-and-forget;
-    // must never throw or fail the compliance sweep).
+
+    // Non-escalation alerts (e.g. DUE_SOON, DOCUMENT_INCONSISTENCY) can still
+    // be CRITICAL in rare cases — fire notification without AI context.
     if (result.alertId && candidate.severity === 'CRITICAL') {
       notifyCriticalAlert({
         alertId: result.alertId,
