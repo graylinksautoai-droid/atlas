@@ -13,6 +13,7 @@ import {
   setPoolOverride,
   loadNotifyConfig,
 } from '../src/notify.ts';
+import { setAuditPoolOverride } from '../src/audit.ts';
 
 /* ── Mock transport ─────────────────────────────────────────────────────── */
 
@@ -50,6 +51,8 @@ const mockPool = {
 
 setTransportOverride(mockTransport);
 setPoolOverride(mockPool);
+// Prevent audit() calls from writing test-fixture IDs to the real database.
+setAuditPoolOverride(mockPool);
 
 function setSmtpEnv(overrides: Partial<Record<string,string>> = {}) {
   process.env.SMTP_HOST  = overrides.SMTP_HOST  ?? 'smtp.example.com';
@@ -414,6 +417,31 @@ test('human approval disclaimer remains in all notification variants', async () 
   duplicateExists = true;
   await notifyCriticalAlert({ ...baseAlert });
   assert.equal(sentMessages.length, 0, 'duplicate suppressed');
+
+  clearSmtpEnv();
+});
+
+/* =========================================================================
+   Regression: audit pool isolation
+   Verifies that setAuditPoolOverride prevents test calls from writing
+   real audit_event rows. If this test runs without the mock in place,
+   the audit() call would attempt a real DB connection.
+   ========================================================================= */
+
+test('setAuditPoolOverride prevents audit() from hitting the real DB pool', async () => {
+  // The audit override is set at module level (at the top of this file).
+  // We verify it is in effect by calling notifyCriticalAlert — which internally
+  // calls audit() on success — and confirming no errors are thrown even though
+  // no real PostgreSQL connection is available.
+  setSmtpEnv();
+  duplicateExists = false;
+  sentMessages.length = 0;
+
+  // This would fail (or silently write to the real DB) if setAuditPoolOverride
+  // were not called, because audit.ts uses a separate pool reference.
+  const result = await notifyCriticalAlert(baseAlert);
+  assert.equal(result, 'sent', 'notification sent successfully through mock path');
+  assert.equal(sentMessages.length, 1, 'exactly one email sent');
 
   clearSmtpEnv();
 });

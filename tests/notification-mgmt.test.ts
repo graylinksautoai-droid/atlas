@@ -22,6 +22,7 @@ import {
   notifyCriticalAlert,
   loadNotifyConfig,
 } from '../src/notify.ts';
+import { setAuditPoolOverride } from '../src/audit.ts';
 import { can } from '../src/auth.ts';
 import type { SessionUser } from '../src/auth.ts';
 
@@ -95,6 +96,11 @@ setPoolOverride({
 
     return { rows: [] };
   },
+} as any);
+
+// Prevent audit() calls from writing test-fixture IDs to the real database.
+setAuditPoolOverride({
+  query: async (_sql: string, _params?: unknown[]) => ({ rows: [] }),
 } as any);
 
 /* ── Helpers ────────────────────────────────────────────────────────────── */

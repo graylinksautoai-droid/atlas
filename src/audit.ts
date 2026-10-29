@@ -1,5 +1,5 @@
 import type { Tx } from './db.ts';
-import { pool } from './db.ts';
+import { pool as defaultPool } from './db.ts';
 
 export interface AuditInput {
   actorType: 'USER' | 'AGENT' | 'SYSTEM';
@@ -9,6 +9,21 @@ export interface AuditInput {
   entityId?: string | null;
   detail?: Record<string, unknown>;
   requestId?: string | null;
+}
+
+/* Pool override for test isolation — prevents test audit() calls from
+ * writing real rows to a live database with fake test-fixture identifiers.
+ * Call setAuditPoolOverride(null) to restore normal behaviour. */
+let _auditPoolOverride: { query: (sql: string, params?: unknown[]) => Promise<unknown> } | null = null;
+
+export function setAuditPoolOverride(
+  p: { query: (sql: string, params?: unknown[]) => Promise<unknown> } | null,
+): void {
+  _auditPoolOverride = p;
+}
+
+function getAuditPool() {
+  return (_auditPoolOverride ?? defaultPool) as typeof defaultPool;
 }
 
 /**
@@ -30,6 +45,6 @@ export async function audit(input: AuditInput, client?: Tx): Promise<void> {
   if (client) {
     await client.query(sql, params);
   } else {
-    await pool.query(sql, params);
+    await getAuditPool().query(sql, params);
   }
 }

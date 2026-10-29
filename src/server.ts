@@ -985,7 +985,7 @@ app.get('/admin/notifications', async (req, reply) => {
             : q.report === 'failed'
               ? { kind: 'error' as const, text: 'Report delivery failed. Check SMTP configuration and try again.' }
               : undefined;
-  return page(reply, adminLayout(user, 'Email notifications', 'admin',
+  return page(reply, adminLayout(user, 'Email notifications', 'notifications',
     adminNotificationsPage({ csrf: user.csrfToken, smtpConfigured, modelConfigured, recipients: rawRecipients, notifications, notice }),
     'Manage critical-alert email notifications',
   ));

@@ -390,7 +390,7 @@ export function overviewPage(data: {
           <thead>
             <tr>
               <th scope="col">Subsidiary</th>
-              <th scope="col" class="num">Projects</th>
+              <th scope="col" class="num">Active projects</th>
               <th scope="col" class="num">Obligations</th>
               <th scope="col" class="num">Overdue</th>
               <th scope="col" class="num">Open risks</th>
@@ -494,7 +494,7 @@ export function subsidiariesPage(_user: SessionUser, _csrf: string, rows: Array<
             <tr>
               <th scope="col">Subsidiary</th>
               <th scope="col">Sector</th>
-              <th scope="col" class="num">Projects</th>
+              <th scope="col" class="num">Total projects</th>
               <th scope="col" class="num">Obligations</th>
               <th scope="col" class="num">Overdue</th>
               <th scope="col">Standing</th>
@@ -2318,7 +2318,7 @@ export function adminHubPage(_csrf: string): string {
       <h2 id="h-admin" class="section__title">Administration</h2>
       <p class="section__meta">Manage portfolio records and user accounts</p>
     </div>
-    <div class="kpis kpis--four">
+    <div class="kpis">
       <a class="kpi kpi--link" href="/admin/users" style="text-decoration:none">
         <p class="kpi__label">User accounts</p>
         <p class="kpi__value">→</p>
