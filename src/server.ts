@@ -27,7 +27,7 @@ import { confirmObligationStatus } from './obligations.ts';
 import { decideApproval } from './agent.ts';
 import { ingestDocument, documentDetail, validateTextUpload } from './documents.ts';
 import * as portfolio from './portfolio.ts';
-import { sendTestNotification } from './notify.ts';
+import { sendTestNotification, listNotificationLog, getAlertNotificationStatus, sendAlertReport } from './notify.ts';
 import * as adminSvc from './admin.ts';
 import { layout, loginPage, esc, fmtDateTime, notice, titleCase } from './views/layout.ts';
 import {
@@ -53,6 +53,7 @@ import {
   adminProjectEditPage,
   adminObligationsPage,
   adminObligationEditPage,
+  adminNotificationsPage,
 } from './views/pages.ts';
 import { startScheduler } from './scheduler.ts';
 
@@ -521,20 +522,41 @@ app.get('/alerts/:id', async (req, reply) => {
   const q = req.query as Record<string, string | undefined>;
   const data = await portfolio.alertDetail(id);
   if (!data.alert) throw new HttpError(404, 'Alert not found.');
-  const noticeText = q.decided === 'executed'
-    ? 'Approved and recorded. Delivery was in application only, and the audit trail says so.'
-    : q.decided === 'rejected'
-      ? 'Rejected. No action was executed.'
-      : q.decided === 'expired'
-        ? 'The obligation changed after review, so execution was refused and the case was queued for reassessment.'
-        : undefined;
+  const notificationStatus = await getAlertNotificationStatus(id).catch(() => ({ exists: false, status: null }));
+
+  // Determine notice text from both approval decisions and report actions
+  let noticeText: string | undefined;
+  let noticeKind: 'ok' | 'warn' | 'error' = 'warn';
+  if (q.decided === 'executed') {
+    noticeText = 'Approved and recorded. Delivery was in application only, and the audit trail says so.';
+    noticeKind = 'ok';
+  } else if (q.decided === 'rejected') {
+    noticeText = 'Rejected. No action was executed.';
+    noticeKind = 'warn';
+  } else if (q.decided === 'expired') {
+    noticeText = 'The obligation changed after review, so execution was refused and the case was queued for reassessment.';
+    noticeKind = 'warn';
+  } else if (q.report === 'sent') {
+    noticeText = 'Critical report sent to configured recipients.';
+    noticeKind = 'ok';
+  } else if (q.report === 'skipped') {
+    noticeText = 'Report not sent. A notification may have already been delivered, or SMTP is not configured.';
+    noticeKind = 'warn';
+  } else if (q.report === 'failed') {
+    noticeText = 'Report delivery failed. Check SMTP configuration and try again.';
+    noticeKind = 'error';
+  }
+
+  (data as Record<string, any>).notificationStatus = notificationStatus;
+  (data as Record<string, any>).notificationNotice = undefined; // notice shown via alertPage top-level param
+  (data as Record<string, any>).notificationNoticeKind = noticeKind;
   return page(
     reply,
     layout({
       user,
       title: titleCase(String(data.alert.type)),
       active: 'alerts',
-      body: alertPage(data, user, user.csrfToken, can(user, 'approve'), noticeText, q.decided === 'rejected' ? 'warn' : 'ok'),
+      body: alertPage(data, user, user.csrfToken, can(user, 'approve'), noticeText, noticeKind),
     }),
   );
 });
@@ -559,6 +581,18 @@ app.post('/alerts/:id/decide', async (req, reply) => {
 
   const flag = result.outcome === 'EXECUTED' ? 'executed' : result.outcome === 'REJECTED' ? 'rejected' : result.outcome === 'EXPIRED' ? 'expired' : 'conflict';
   return reply.redirect(`/alerts/${id}?decided=${flag}`);
+});
+
+app.post('/alerts/:id/send-report', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'run_check', 'Your role cannot send critical reports.');
+  const id = requireUuid((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Record<string, string>;
+  const force = body.force === '1';
+  const result = await sendAlertReport({ alertId: id, actorId: user.id, force });
+  const flag = result.status === 'sent' ? 'sent' : result.status === 'failed' ? 'failed' : 'skipped';
+  return reply.redirect(`/alerts/${id}?report=${flag}`);
 });
 
 app.get('/activity', async (req, reply) => {
@@ -919,29 +953,42 @@ app.post('/admin/test-notification', async (req, reply) => {
   requireCan(user, 'manage', 'Only administrators can send test notifications.');
   checkCsrf(req, user);
   const result = await sendTestNotification({ requestedBy: user.id });
-  const kind = result.status === 'sent' ? 'ok' : result.status === 'failed' ? 'error' : 'warn';
-  const message = result.status === 'sent'
-    ? `Test notification sent to ${result.recipients.length} recipient(s). Message ID: ${result.messageId ?? 'n/a'}`
+  const msg = result.status === 'sent'
+    ? `Test email sent to ${result.recipients.length} recipient(s). Message ID: ${result.messageId ?? 'n/a'}`
     : result.status === 'failed'
       ? `Delivery failed: ${result.error ?? 'unknown error'}`
       : `Skipped: ${result.error ?? 'SMTP not configured'}`;
-  const [runs, trail] = await Promise.all([portfolio.recentAgentActivity(30), portfolio.auditTrail({ limit: 120 })]);
-  return page(
-    reply,
-    layout({
-      user,
-      title: 'Agent activity and audit',
-      active: 'activity',
-      subtitle: 'What ran, what it saw, what it decided, and what a human then did.',
-      wide: true,
-      body: notice(kind, message) + activityPage({
-        user,
-        runs,
-        audit: trail,
-        modelLabel: modelConfigured ? config.ai.model : 'not configured, deterministic only',
-      }),
-    }),
-  );
+  const flag = result.status === 'sent' ? 'ok' : result.status === 'failed' ? 'fail' : 'skip';
+  return reply.redirect(`/admin/notifications?test=${flag}`);
+});
+
+/** Email notification management page. ADMIN only. */
+app.get('/admin/notifications', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const q = req.query as Record<string, string | undefined>;
+  const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  const rawRecipients = (process.env.ATLAS_CRITICAL_REPORT_RECIPIENTS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const [notifications] = await Promise.all([
+    listNotificationLog(20).catch(() => []),
+  ]);
+  const notice = q.test === 'ok'
+    ? { kind: 'ok' as const, text: 'Test email sent successfully. Check recipient inboxes for delivery.' }
+    : q.test === 'fail'
+      ? { kind: 'error' as const, text: 'Test email delivery failed. Check SMTP configuration and credentials.' }
+      : q.test === 'skip'
+        ? { kind: 'warn' as const, text: 'Test email skipped. SMTP is not configured.' }
+        : q.report === 'sent'
+          ? { kind: 'ok' as const, text: 'Critical report sent to configured recipients.' }
+          : q.report === 'skipped'
+            ? { kind: 'warn' as const, text: 'Report not sent. A notification may have already been delivered, or SMTP is not configured.' }
+            : q.report === 'failed'
+              ? { kind: 'error' as const, text: 'Report delivery failed. Check SMTP configuration and try again.' }
+              : undefined;
+  return page(reply, adminLayout(user, 'Email notifications', 'admin',
+    adminNotificationsPage({ csrf: user.csrfToken, smtpConfigured, modelConfigured, recipients: rawRecipients, notifications, notice }),
+    'Manage critical-alert email notifications',
+  ));
 });
 
 /* JSON API --------------------------------------------------------------- */

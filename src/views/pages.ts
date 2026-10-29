@@ -1417,12 +1417,195 @@ export function alertPage(
       <p class="panel__meta">${data.actions.length} recorded</p>
     </div>
     ${actions}
+  </section>
+
+  ${a.severity === 'CRITICAL' && data.notificationStatus ? notificationSection(a, data, csrf, canApprove) : ''}`;
+}
+
+/* =========================================================================
+   Notification section for CRITICAL alert detail
+   ========================================================================= */
+
+function notificationSection(a: Record<string, any>, data: Record<string, any>, csrf: string, canAct: boolean): string {
+  const ns = data.notificationStatus as { exists: boolean; status: string | null };
+  const noticeText = data.notificationNotice as string | undefined;
+
+  let statusDisplay: string;
+  if (!ns.exists) {
+    statusDisplay = '<p class="prose">No notification has been sent for this alert.</p>';
+  } else if (ns.status === 'SENT') {
+    statusDisplay = `<p class="prose">${statusTag('EXECUTED')} Notification delivered to configured recipients.</p>`;
+  } else if (ns.status === 'FAILED') {
+    statusDisplay = `<p class="prose"><span class="tag tag--critical"><span class="tag__dot" aria-hidden="true"></span>Failed</span> The last delivery attempt failed. You can retry below.</p>`;
+  } else {
+    statusDisplay = `<p class="prose"><span class="tag tag--warn"><span class="tag__dot" aria-hidden="true"></span>Pending</span> A notification is in progress.</p>`;
+  }
+
+  const sendForm = canAct ? `
+    <hr class="approval__divider">
+    <form method="post" action="/alerts/${esc(a.id)}/send-report" class="stack">
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      ${ns.exists && ns.status === 'SENT'
+        ? `<label class="field">
+            <span class="field__label">Force resend confirmation</span>
+            <select class="input input--select" name="force" required>
+              <option value="">No — do not resend</option>
+              <option value="1">Yes — send again to all recipients</option>
+            </select>
+          </label>
+          <p class="panel__meta">A notification was already sent. Resending will create a distinct audited delivery attempt.</p>`
+        : `<input type="hidden" name="force" value="0">`
+      }
+      <button class="btn btn--primary" type="submit">
+        ${ns.exists && ns.status === 'SENT' ? 'Force resend report' : ns.exists && ns.status === 'FAILED' ? 'Retry notification' : 'Send critical report'}
+      </button>
+    </form>
+    <p class="panel__meta">This sends an informational email to configured recipients. It does not approve or execute an escalation. All consequential actions remain subject to human approval.</p>` : '';
+
+  return `${noticeText ? notice(data.notificationNoticeKind ?? 'info', noticeText) : ''}
+  <section class="panel" aria-labelledby="h-notify">
+    <div class="panel__head">
+      <h2 id="h-notify" class="panel__title">Critical report notification</h2>
+      <p class="panel__meta">Email delivery to configured recipients</p>
+    </div>
+    <div class="panel__body">
+      ${statusDisplay}
+      ${sendForm}
+    </div>
   </section>`;
 }
 
 /* =========================================================================
-   Activity and audit trail
+   Admin: Email Notifications page
    ========================================================================= */
+
+export function adminNotificationsPage(data: {
+  csrf: string;
+  smtpConfigured: boolean;
+  modelConfigured: boolean;
+  recipients: string[];
+  notifications: Array<{
+    id: string;
+    alert_id: string;
+    status: string;
+    error_message: string | null;
+    attempted_at: Date;
+    resolved_at: Date | null;
+    alert_type: string;
+    severity: string;
+    subsidiary_name: string;
+    obligation_title: string | null;
+  }>;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const smtpTag = data.smtpConfigured
+    ? '<span class="tag tag--ok"><span class="tag__dot" aria-hidden="true"></span>Configured</span>'
+    : '<span class="tag tag--muted"><span class="tag__dot" aria-hidden="true"></span>Not configured</span>';
+
+  const aiTag = data.modelConfigured
+    ? '<span class="tag tag--ok"><span class="tag__dot" aria-hidden="true"></span>Configured</span>'
+    : '<span class="tag tag--muted"><span class="tag__dot" aria-hidden="true"></span>Not configured</span>';
+
+  const recipientDisplay = data.recipients.length > 0
+    ? data.recipients.map((r) => esc(r)).join('<br>')
+    : '<span class="cell__sub">No recipients configured</span>';
+
+  const historyRows = data.notifications.length
+    ? data.notifications.map((n) => {
+        const statusBadge = n.status === 'SENT'
+          ? statusTag('EXECUTED')
+          : n.status === 'FAILED'
+            ? statusTag('FAILED')
+            : statusTag('PENDING');
+        return `<tr>
+          <td>
+            <a class="link" href="/alerts/${esc(n.alert_id)}">${esc(String(n.alert_type).replace(/_/g, ' ').toLowerCase())}</a>
+            <span class="cell__sub">${esc(n.obligation_title ?? 'Portfolio level')}</span>
+          </td>
+          <td>${esc(n.subsidiary_name)}</td>
+          <td>${severityTag(n.severity)}</td>
+          <td>${statusBadge}</td>
+          <td class="num">${esc(fmtDateTime(n.attempted_at))}</td>
+          <td><span class="cell__sub cell__detail">${esc(n.error_message ?? '\u2014')}</span></td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="6">${emptyState('No notifications sent', 'Critical alert notifications will appear here when SMTP is configured and new CRITICAL alerts are detected.')}</td></tr>`;
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-notify-config">
+      <div class="panel__head">
+        <h2 id="h-notify-config" class="panel__title">Notification configuration</h2>
+      </div>
+      <dl class="facts">
+        <div><dt>SMTP transport</dt><dd>${smtpTag}
+          <span class="cell__sub">${data.smtpConfigured ? 'Gmail SMTP is configured and verified.' : 'Set SMTP_HOST, SMTP_USER, and SMTP_PASS in .env to enable.'}</span>
+        </dd></div>
+        <div><dt>AI assessment</dt><dd>${aiTag}
+          <span class="cell__sub">${data.modelConfigured ? 'Model is configured. Critical reports may include AI-generated summaries.' : 'Set AI_PROVIDER and AI_API_KEY in .env to enable.'}</span>
+        </dd></div>
+        <div><dt>Recipients</dt><dd>${recipientDisplay}</dd></div>
+        <div><dt>Scheduler</dt><dd><span class="tag tag--ok"><span class="tag__dot" aria-hidden="true"></span>Active</span>
+          <span class="cell__sub">Compliance checks run every 15 minutes.</span>
+        </dd></div>
+      </dl>
+    </section>
+    <section class="panel" aria-labelledby="h-test-email">
+      <div class="panel__head">
+        <h2 id="h-test-email" class="panel__title">Test delivery</h2>
+      </div>
+      <div class="panel__body">
+        <p class="prose">Send a clearly labelled test email to verify that SMTP delivery works. This does not create a real alert or trigger any workflow.</p>
+        <form method="post" action="/admin/test-notification" class="stack">
+          <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+          <button class="btn btn--primary" type="submit" ${data.smtpConfigured ? '' : 'disabled aria-disabled="true"'}>Send test email</button>
+        </form>
+        <p class="panel__meta">Test emails are separate from real critical alerts. The subject will be labelled <code>[ATLAS DEMO]</code>.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="h-notify-history">
+    <div class="panel__head">
+      <h2 id="h-notify-history" class="panel__title">Notification history</h2>
+      <p class="panel__meta">${data.notifications.length} attempt(s) recorded</p>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Alert</th>
+            <th scope="col">Subsidiary</th>
+            <th scope="col">Severity</th>
+            <th scope="col">Delivery</th>
+            <th scope="col" class="num">Attempted</th>
+            <th scope="col">Diagnostics</th>
+          </tr>
+        </thead>
+        <tbody>${historyRows}</tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-notify-info">
+    <div class="panel__head">
+      <h2 id="h-notify-info" class="panel__title">How notifications work</h2>
+    </div>
+    <div class="panel__body">
+      <ul class="prose-list">
+        <li>Scheduled compliance checks run every 15 minutes.</li>
+        <li>When a <strong>new</strong> CRITICAL alert is created, an automatic email notification is sent to the configured recipients if SMTP is configured.</li>
+        <li>Existing alerts are not re-notified when the server restarts or the scheduler repeats a check. Each alert triggers at most one automatic notification.</li>
+        <li>Manual "Send report" is available on CRITICAL alert detail pages for COMPLIANCE and ADMIN roles.</li>
+        <li>If a notification failed, you can retry from the alert detail page without confirmation.</li>
+        <li>If a notification was already sent, resending requires explicit confirmation and creates a distinct audited delivery attempt.</li>
+        <li>Test emails are separate from real critical alerts and do not create audit records for alert notifications.</li>
+        <li>SMTP acceptance (the transport accepted the message) is different from confirmed inbox delivery. Check recipient inboxes to confirm receipt.</li>
+        <li>Critical report notifications are informational only. They do not approve or execute escalations. All consequential actions remain subject to human approval.</li>
+      </ul>
+    </div>
+  </section>`;
+}
 
 export function activityPage(data: {
   user: SessionUser;
@@ -2155,6 +2338,11 @@ export function adminHubPage(_csrf: string): string {
         <p class="kpi__label">Obligations</p>
         <p class="kpi__value">→</p>
         <p class="kpi__detail">Add and edit compliance obligations</p>
+      </a>
+      <a class="kpi kpi--link" href="/admin/notifications" style="text-decoration:none">
+        <p class="kpi__label">Email notifications</p>
+        <p class="kpi__value">→</p>
+        <p class="kpi__detail">Status, history, and test delivery</p>
       </a>
     </div>
   </section>`;

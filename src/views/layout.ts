@@ -103,6 +103,7 @@ const ICONS: Record<string, string> = {
   alerts:        `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 1.5L1 13h14L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
   activity:      `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M1 8h2.5L5 4l3 8 2-5 1.5 2.5H15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   admin:         `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="5" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M2 14c0-3 2-5 6-5s6 2 6 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+  notifications: `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 1.5c-3 0-5 2-5 4.5v2l-1 2h12l-1-2V6c0-2.5-2-4.5-5-4.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
 };
 
 const NAV: Array<{ href: string; label: string; key: string; roles?: string[] }> = [
@@ -113,7 +114,8 @@ const NAV: Array<{ href: string; label: string; key: string; roles?: string[] }>
   { href: '/documents',    label: 'Documents',        key: 'documents'     },
   { href: '/alerts',       label: 'Alerts',           key: 'alerts'        },
   { href: '/activity',     label: 'Agent activity',   key: 'activity'      },
-  { href: '/admin',        label: 'Administration',   key: 'admin',        roles: ['ADMIN'] },
+  { href: '/admin',           label: 'Administration',   key: 'admin',           roles: ['ADMIN'] },
+  { href: '/admin/notifications', label: 'Notifications', key: 'notifications',  roles: ['ADMIN'] },
 ];
 
 export function layout(input: {
