@@ -6,7 +6,7 @@ import { hashPassword } from '../src/auth.ts';
  * runs so the demonstration never goes stale: some obligations are overdue,
  * some are due soon, some are closed.
  */
-const DEMO_PASSWORD = process.env.SEED_PASSWORD ?? 'AtlasDemo!2026';
+const DEMO_PASSWORD = process.env.SEED_PASSWORD || 'AtlasDemo!2026';
 
 const day = 86_400_000;
 const at = (offsetDays: number, hour = 17): Date => {

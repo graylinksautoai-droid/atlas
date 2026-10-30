@@ -7,7 +7,7 @@ delete process.env.AI_API_KEY;
 import { readFileSync, existsSync } from 'node:fs';
 const envFile = existsSync('.env') ? readFileSync('.env', 'utf8') : '';
 const dotenv: Record<string, string> = {};
-for (const line of envFile.split('\n')) {
+for (const line of envFile.split(/\r?\n/)) {
   const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
   if (match) dotenv[match[1]] = match[2].trim();
 }
@@ -21,7 +21,7 @@ const { seed } = await import('../scripts/seed.ts');
 const { one, closePool } = await import('../src/db.ts');
 const { app } = await import('../src/server.ts');
 
-const PASSWORD = process.env.SEED_PASSWORD ?? 'AtlasDemo!2026';
+const PASSWORD = process.env.SEED_PASSWORD || 'AtlasDemo!2026';
 let execCookie = '';
 let complianceCookie = '';
 let execCsrf = '';
