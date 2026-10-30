@@ -29,6 +29,9 @@ import { ingestDocument, documentDetail, validateTextUpload } from './documents.
 import * as portfolio from './portfolio.ts';
 import { sendTestNotification, listNotificationLog, getAlertNotificationStatus, sendAlertReport } from './notify.ts';
 import * as adminSvc from './admin.ts';
+import * as contactsSvc from './contacts.ts';
+import * as commsSvc from './comms.ts';
+import { countUnread, listNotificationsForUser, markRead, markAllRead, createNotification } from './inbox.ts';
 import { layout, loginPage, esc, fmtDateTime, notice, titleCase } from './views/layout.ts';
 import {
   overviewPage,
@@ -54,6 +57,11 @@ import {
   adminObligationsPage,
   adminObligationEditPage,
   adminNotificationsPage,
+  notificationsPage,
+  adminContactsPage,
+  adminContactEditPage,
+  adminCommunicationsPage,
+  adminCommunicationDetailPage,
 } from './views/pages.ts';
 import { startScheduler } from './scheduler.ts';
 
@@ -123,6 +131,11 @@ function safeNext(value: unknown): string {
 function requireUser(user: SessionUser | null): SessionUser {
   if (!user) throw new HttpError(401, 'Sign in to continue.');
   return user;
+}
+
+/** Get unread count for the current user — used in every layout() call. */
+async function getUnreadCount(user: SessionUser): Promise<number> {
+  return countUnread(user.id).catch(() => 0);
 }
 
 function requireCan(user: SessionUser, action: 'run_check' | 'upload' | 'approve' | 'manage', message?: string): void {
@@ -257,12 +270,14 @@ app.get('/', async (req, reply) => {
   const emailConfigured = Boolean(
     process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS,
   );
+  const unreadCount = await getUnreadCount(user);
   return page(
     reply,
     layout({
       user,
       title: 'Executive overview',
       active: 'overview',
+      unreadCount,
       body: overviewPage({
         user,
         csrf: user.csrfToken,
@@ -989,6 +1004,230 @@ app.get('/admin/notifications', async (req, reply) => {
     adminNotificationsPage({ csrf: user.csrfToken, smtpConfigured, modelConfigured, recipients: rawRecipients, notifications, notice }),
     'Manage critical-alert email notifications',
   ));
+});
+
+/* Notifications inbox ---------------------------------------------------- */
+
+app.get('/notifications', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  const q = req.query as Record<string, string | undefined>;
+  const [notifications, unreadCount] = await Promise.all([
+    listNotificationsForUser(user.id, user.role, 50).catch(() => []),
+    getUnreadCount(user),
+  ]);
+  const noticeArg = q.marked === '1' ? { kind: 'ok' as const, text: 'Notification marked as read.' }
+    : q.all === '1' ? { kind: 'ok' as const, text: 'All notifications marked as read.' }
+    : undefined;
+  return page(reply, layout({
+    user, title: 'Notifications', active: 'notifications', unreadCount,
+    body: notificationsPage({ user, csrf: user.csrfToken, notifications, unreadCount, notice: noticeArg }),
+  }));
+});
+
+app.post('/notifications/:id/read', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  const id = requireUuid((req.params as { id: string }).id);
+  await markRead(id, user.id);
+  return reply.redirect('/notifications?marked=1');
+});
+
+app.post('/notifications/read-all', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  await markAllRead(user.id);
+  return reply.redirect('/notifications?all=1');
+});
+
+/* Subsidiary contacts (ADMIN) -------------------------------------------- */
+
+app.get('/admin/contacts', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const q = req.query as Record<string, string | undefined>;
+  const [contacts, subs] = await Promise.all([
+    contactsSvc.listAllContacts(),
+    adminSvc.subsidiarySelectorOptions(),
+  ]);
+  const noticeArg = q.created === '1' ? { kind: 'ok' as const, text: 'Contact added.' }
+    : q.updated === '1' ? { kind: 'ok' as const, text: 'Contact updated.' }
+    : undefined;
+  return page(reply, adminLayout(user, 'Contacts', 'admin',
+    adminContactsPage({ csrf: user.csrfToken, contacts, subsidiaries: subs, notice: noticeArg }),
+    'Manage subsidiary contact persons',
+  ));
+});
+
+app.post('/admin/contacts', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await contactsSvc.createContact({
+    subsidiaryId: String(body.subsidiaryId ?? ''),
+    name: String(body.name ?? ''),
+    email: String(body.email ?? ''),
+    designation: String(body.designation ?? ''),
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect('/admin/contacts?created=1');
+  const [contacts, subs] = await Promise.all([contactsSvc.listAllContacts(), adminSvc.subsidiarySelectorOptions()]);
+  return page(reply, adminLayout(user, 'Contacts', 'admin',
+    adminContactsPage({ csrf: user.csrfToken, contacts, subsidiaries: subs, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+app.get('/admin/contacts/:id/edit', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const contact = await contactsSvc.getContact(id);
+  if (!contact) throw new HttpError(404, 'Contact not found.');
+  const q = req.query as Record<string, string | undefined>;
+  const noticeArg = q.updated === '1' ? { kind: 'ok' as const, text: 'Changes saved.' } : undefined;
+  return page(reply, adminLayout(user, contact.name, 'admin',
+    adminContactEditPage({ csrf: user.csrfToken, contact, notice: noticeArg }),
+  ));
+});
+
+app.post('/admin/contacts/:id', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await contactsSvc.updateContact({
+    id,
+    name: String(body.name ?? ''),
+    email: String(body.email ?? ''),
+    designation: String(body.designation ?? ''),
+    is_active: body.is_active === '1',
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect(`/admin/contacts/${id}/edit?updated=1`);
+  const contact = await contactsSvc.getContact(id);
+  if (!contact) throw new HttpError(404, 'Contact not found.');
+  return page(reply, adminLayout(user, contact.name, 'admin',
+    adminContactEditPage({ csrf: user.csrfToken, contact, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+/* Communications workflow (ADMIN) ---------------------------------------- */
+
+app.get('/admin/communicate', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const q = req.query as Record<string, string | undefined>;
+  const [communications, subs] = await Promise.all([
+    commsSvc.listCommunications(50).catch(() => []),
+    adminSvc.subsidiarySelectorOptions(),
+  ]);
+  const noticeArg = q.created === '1' ? { kind: 'ok' as const, text: 'Draft created. Review and send below.' }
+    : q.failed === '1' ? { kind: 'error' as const, text: 'Could not create draft. Check the form and try again.' }
+    : undefined;
+  return page(reply, adminLayout(user, 'Communications', 'admin',
+    adminCommunicationsPage({ csrf: user.csrfToken, communications, subsidiaries: subs, notice: noticeArg }),
+    'Draft and send compliance communications',
+  ));
+});
+
+app.post('/admin/communicate', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const body = (req.body ?? {}) as Record<string, string>;
+  const subsidiaryId = String(body.subsidiaryId ?? '');
+  const recipientEmail = String(body.recipientEmail ?? '').trim().toLowerCase();
+  const relatedAlertId = String(body.relatedAlertId ?? '').trim() || null;
+  const relatedObligationId = String(body.relatedObligationId ?? '').trim() || null;
+
+  if (!subsidiaryId) return reply.redirect('/admin/communicate?failed=1');
+
+  // Find matching contact by email in this subsidiary
+  const contacts = await contactsSvc.listContactsForSubsidiary(subsidiaryId);
+  const contact = contacts.find((c) => c.email === recipientEmail);
+  if (!contact) {
+    const [communications, subs] = await Promise.all([commsSvc.listCommunications(50).catch(() => []), adminSvc.subsidiarySelectorOptions()]);
+    return page(reply, adminLayout(user, 'Communications', 'admin',
+      adminCommunicationsPage({
+        csrf: user.csrfToken, communications, subsidiaries: subs,
+        notice: { kind: 'error', text: `No active contact found for ${recipientEmail} in this subsidiary. Add the contact first.` },
+      }),
+    ), 422);
+  }
+
+  const result = await commsSvc.createDraft({
+    subsidiaryId,
+    recipientContactId: contact.id,
+    relatedAlertId: relatedAlertId && /^[0-9a-f-]{36}$/i.test(relatedAlertId) ? relatedAlertId : null,
+    relatedObligationId: relatedObligationId && /^[0-9a-f-]{36}$/i.test(relatedObligationId) ? relatedObligationId : null,
+    actorId: user.id,
+  });
+  if (!result.ok) return reply.redirect('/admin/communicate?failed=1');
+  return reply.redirect(`/admin/communicate/${result.id}?created=1`);
+});
+
+app.get('/admin/communicate/:id', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const comm = await commsSvc.getCommunication(id);
+  if (!comm) throw new HttpError(404, 'Communication not found.');
+  const q = req.query as Record<string, string | undefined>;
+  const noticeArg = q.created === '1' ? { kind: 'ok' as const, text: 'Draft created. Review the message and send when ready.' }
+    : q.sent === '1' ? { kind: 'ok' as const, text: 'Message sent successfully.' }
+    : q.failed === '1' ? { kind: 'error' as const, text: 'Delivery failed. You can retry from this page.' }
+    : q.saved === '1' ? { kind: 'ok' as const, text: 'Draft saved.' }
+    : undefined;
+  return page(reply, adminLayout(user, comm.subject.slice(0, 60), 'admin',
+    adminCommunicationDetailPage({ csrf: user.csrfToken, comm, notice: noticeArg }),
+  ));
+});
+
+app.post('/admin/communicate/:id/update', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const body = (req.body ?? {}) as Record<string, string>;
+  const result = await commsSvc.updateDraft({
+    id,
+    subject: String(body.subject ?? ''),
+    messageBody: String(body.messageBody ?? ''),
+    actorId: user.id,
+  });
+  if (result.ok) return reply.redirect(`/admin/communicate/${id}?saved=1`);
+  const comm = await commsSvc.getCommunication(id);
+  if (!comm) throw new HttpError(404, 'Communication not found.');
+  return page(reply, adminLayout(user, comm.subject.slice(0, 60), 'admin',
+    adminCommunicationDetailPage({ csrf: user.csrfToken, comm, notice: { kind: 'error', text: result.reason! } }),
+  ), 422);
+});
+
+app.post('/admin/communicate/:id/send', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  const result = await commsSvc.sendCommunication(id, user.id);
+  const flag = result.ok ? 'sent=1' : 'failed=1';
+  return reply.redirect(`/admin/communicate/${id}?${flag}`);
+});
+
+app.post('/admin/communicate/:id/retry', async (req, reply) => {
+  const user = requireUser(await currentUser(req));
+  checkCsrf(req, user);
+  requireCan(user, 'manage');
+  const id = requireUuid((req.params as { id: string }).id);
+  // Reset to DRAFT so it can be sent again
+  const comm = await commsSvc.getCommunication(id);
+  if (!comm || comm.status !== 'FAILED') throw new HttpError(400, 'Only failed communications can be retried.');
+  await import('./db.ts').then(({ query: dbQuery }) =>
+    dbQuery(`UPDATE communication_log SET status = 'DRAFT', error_message = NULL, updated_at = now() WHERE id = $1`, [id]),
+  );
+  const result = await commsSvc.sendCommunication(id, user.id);
+  const flag = result.ok ? 'sent=1' : 'failed=1';
+  return reply.redirect(`/admin/communicate/${id}?${flag}`);
 });
 
 /* JSON API --------------------------------------------------------------- */

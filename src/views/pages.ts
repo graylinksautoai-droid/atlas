@@ -2344,6 +2344,399 @@ export function adminHubPage(_csrf: string): string {
         <p class="kpi__value">→</p>
         <p class="kpi__detail">Status, history, and test delivery</p>
       </a>
+      <a class="kpi kpi--link" href="/admin/contacts" style="text-decoration:none">
+        <p class="kpi__label">Contacts</p>
+        <p class="kpi__value">→</p>
+        <p class="kpi__detail">Subsidiary contact persons</p>
+      </a>
+      <a class="kpi kpi--link" href="/admin/communicate" style="text-decoration:none">
+        <p class="kpi__label">Communications</p>
+        <p class="kpi__value">→</p>
+        <p class="kpi__detail">Draft and send compliance reports</p>
+      </a>
     </div>
   </section>`;
+}
+
+/* =========================================================================
+   Notification centre (per-user inbox)
+   ========================================================================= */
+
+import type { InAppNotification } from '../inbox.ts';
+
+export function notificationsPage(data: {
+  user: SessionUser;
+  csrf: string;
+  notifications: InAppNotification[];
+  unreadCount: number;
+  notice?: { kind: 'ok' | 'warn' | 'error'; text: string };
+}): string {
+  const items = data.notifications.length
+    ? data.notifications.map((n) => {
+        const isUnread = !n.read_at;
+        const typeLabel: Record<string, string> = {
+          CRITICAL_ALERT:      'Critical alert',
+          HIGH_ALERT:          'High alert',
+          OVERDUE_OBLIGATION:  'Overdue obligation',
+          SCHEDULE_RISK:       'Schedule risk',
+          COMMUNICATION_SENT:  'Communication sent',
+          SYSTEM:              'System',
+        };
+        return `<li class="notif-item${isUnread ? ' notif-item--unread' : ''}">
+          <span class="notif-dot" aria-hidden="true"></span>
+          <div class="notif-body">
+            <span class="notif-title">${esc(n.title)}</span>
+            ${n.message ? `<p class="notif-msg">${esc(n.message)}</p>` : ''}
+            <div class="notif-meta">
+              <span class="tag tag--${n.type === 'CRITICAL_ALERT' || n.type === 'HIGH_ALERT' ? 'critical' : 'info'}">${esc(typeLabel[n.type] ?? n.type)}</span>
+              <span>${esc(fmtDateTime(n.created_at))}</span>
+              ${n.link ? `<a class="notif-link" href="${esc(n.link)}">View →</a>` : ''}
+              ${isUnread
+                ? `<form method="post" action="/notifications/${esc(n.id)}/read" class="inline" style="margin-left:auto">
+                    <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+                    <button class="btn btn--ghost btn--small" type="submit">Mark read</button>
+                  </form>`
+                : `<span class="cell__sub">Read ${esc(fmtDateTime(n.read_at!))}</span>`
+              }
+            </div>
+          </div>
+        </li>`;
+      }).join('')
+    : `<li class="notif-item">${emptyState('No notifications', 'New alerts, overdue obligations and administrative messages will appear here.')}</li>`;
+
+  const markAllForm = data.unreadCount > 0
+    ? `<form method="post" action="/notifications/read-all" class="inline">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <button class="btn btn--ghost btn--small" type="submit">Mark all read</button>
+      </form>`
+    : '';
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <section class="panel" aria-labelledby="h-inbox">
+    <div class="panel__head">
+      <h2 id="h-inbox" class="panel__title">Notifications</h2>
+      <div class="row row--tags">
+        ${data.unreadCount > 0 ? `<span class="tag tag--info">${data.unreadCount} unread</span>` : ''}
+        ${markAllForm}
+      </div>
+    </div>
+    <ul class="notif-list">${items}</ul>
+  </section>`;
+}
+
+/* =========================================================================
+   Subsidiary contacts management (ADMIN)
+   ========================================================================= */
+
+import type { SubsidiaryContact } from '../contacts.ts';
+
+export function adminContactsPage(data: {
+  csrf: string;
+  contacts: SubsidiaryContact[];
+  subsidiaries: Array<{ id: string; name: string; code: string }>;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const rows = data.contacts.length
+    ? data.contacts.map((c) => `<tr>
+        <td>
+          <a class="link" href="/admin/contacts/${esc(c.id)}/edit">${esc(c.name)}</a>
+          <span class="cell__sub">${esc(c.email)}</span>
+        </td>
+        <td>${esc(c.subsidiary_name)}</td>
+        <td>${esc(c.designation || '—')}</td>
+        <td>${c.is_active ? statusTag('ACTIVE') : statusTag('ON_HOLD')}</td>
+        <td><a class="btn btn--ghost btn--small" href="/admin/contacts/${esc(c.id)}/edit">Edit</a></td>
+      </tr>`).join('')
+    : `<tr><td colspan="5">${emptyState('No contacts', 'Add the first subsidiary contact below.')}</td></tr>`;
+
+  const subOptions = data.subsidiaries.map((s) =>
+    `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.code)})</option>`
+  ).join('');
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-contacts">
+      <div class="panel__head">
+        <h2 id="h-contacts" class="panel__title">Subsidiary contacts</h2>
+        <p class="panel__meta">${data.contacts.length} registered</p>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Name / email</th>
+              <th scope="col">Subsidiary</th>
+              <th scope="col">Designation</th>
+              <th scope="col">Status</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="h-new-contact">
+      <div class="panel__head">
+        <h2 id="h-new-contact" class="panel__title">Add contact</h2>
+      </div>
+      <form method="post" action="/admin/contacts" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <label class="field">
+          <span class="field__label">Subsidiary <span aria-hidden="true">*</span></span>
+          <select class="input input--select" name="subsidiaryId" required>
+            <option value="">Select subsidiary</option>
+            ${subOptions}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Name <span aria-hidden="true">*</span></span>
+          <input class="input" type="text" name="name" required minlength="2" maxlength="120">
+        </label>
+        <label class="field">
+          <span class="field__label">Email address <span aria-hidden="true">*</span></span>
+          <input class="input" type="email" name="email" required spellcheck="false" autocomplete="off">
+        </label>
+        <label class="field">
+          <span class="field__label">Designation</span>
+          <input class="input" type="text" name="designation" maxlength="120" placeholder="e.g. Compliance Officer">
+        </label>
+        <button class="btn btn--primary" type="submit">Add contact</button>
+      </form>
+    </section>
+  </div>`;
+}
+
+export function adminContactEditPage(data: {
+  csrf: string;
+  contact: SubsidiaryContact;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const c = data.contact;
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a class="link" href="/admin/contacts">Contacts</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">${esc(c.name)}</span>
+  </nav>
+  <section class="panel" aria-labelledby="h-edit-contact">
+    <div class="panel__head">
+      <h2 id="h-edit-contact" class="panel__title">Edit contact</h2>
+      <p class="panel__meta">${esc(c.subsidiary_name)}</p>
+    </div>
+    <form method="post" action="/admin/contacts/${esc(c.id)}" class="stack">
+      <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+      <label class="field">
+        <span class="field__label">Name <span aria-hidden="true">*</span></span>
+        <input class="input" type="text" name="name" value="${esc(c.name)}" required minlength="2" maxlength="120">
+      </label>
+      <label class="field">
+        <span class="field__label">Email address <span aria-hidden="true">*</span></span>
+        <input class="input" type="email" name="email" value="${esc(c.email)}" required spellcheck="false">
+      </label>
+      <label class="field">
+        <span class="field__label">Designation</span>
+        <input class="input" type="text" name="designation" value="${esc(c.designation)}" maxlength="120">
+      </label>
+      <label class="field">
+        <span class="field__label">Status</span>
+        <select class="input input--select" name="is_active">
+          <option value="1" ${c.is_active ? 'selected' : ''}>Active</option>
+          <option value="0" ${!c.is_active ? 'selected' : ''}>Deactivated</option>
+        </select>
+      </label>
+      <div class="row">
+        <button class="btn btn--primary" type="submit">Save changes</button>
+        <a class="btn btn--ghost" href="/admin/contacts">Cancel</a>
+      </div>
+    </form>
+  </section>`;
+}
+
+/* =========================================================================
+   Communications compose and history (ADMIN)
+   ========================================================================= */
+
+import type { CommunicationEntry } from '../comms.ts';
+
+export function adminCommunicationsPage(data: {
+  csrf: string;
+  communications: CommunicationEntry[];
+  subsidiaries: Array<{ id: string; name: string; code: string }>;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const rows = data.communications.length
+    ? data.communications.map((c) => {
+        const badge = c.status === 'SENT'
+          ? statusTag('EXECUTED')
+          : c.status === 'FAILED'
+            ? statusTag('FAILED')
+            : c.status === 'DRAFT'
+              ? '<span class="tag tag--muted"><span class="tag__dot" aria-hidden="true"></span>Draft</span>'
+              : statusTag('PENDING');
+        return `<tr>
+          <td>
+            <a class="link" href="/admin/communicate/${esc(c.id)}">${esc(c.subject)}</a>
+            <span class="cell__sub">${esc(c.recipient_name)} · ${esc(c.recipient_email)}</span>
+          </td>
+          <td>${esc(c.subsidiary_name)}</td>
+          <td>${badge}</td>
+          <td>
+            ${c.ai_assisted ? `<span class="ai-badge">AI</span>` : '<span class="tag tag--muted">Deterministic</span>'}
+          </td>
+          <td class="num">${esc(c.sent_at ? fmtDateTime(c.sent_at) : fmtDateTime(c.created_at))}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="5">${emptyState('No communications', 'Create a draft communication to contact a subsidiary.')}</td></tr>`;
+
+  const subOptions = data.subsidiaries.map((s) =>
+    `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.code)})</option>`
+  ).join('');
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-comms-hist">
+      <div class="panel__head">
+        <h2 id="h-comms-hist" class="panel__title">Communication history</h2>
+        <p class="panel__meta">${data.communications.length} record(s)</p>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Subject / recipient</th>
+              <th scope="col">Subsidiary</th>
+              <th scope="col">Status</th>
+              <th scope="col">Draft source</th>
+              <th scope="col" class="num">Date</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="h-new-comm">
+      <div class="panel__head">
+        <h2 id="h-new-comm" class="panel__title">New communication</h2>
+      </div>
+      <div class="panel__body">
+        <p class="prose">Select a subsidiary and contact to generate a compliance draft. You will be able to review and edit the message before sending.</p>
+      </div>
+      <form method="post" action="/admin/communicate" class="stack">
+        <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+        <label class="field">
+          <span class="field__label">Subsidiary <span aria-hidden="true">*</span></span>
+          <select class="input input--select" name="subsidiaryId" required>
+            <option value="">Select subsidiary</option>
+            ${subOptions}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Contact email <span aria-hidden="true">*</span></span>
+          <input class="input" type="email" name="recipientEmail" required spellcheck="false"
+            placeholder="Must match an active contact for this subsidiary">
+        </label>
+        <label class="field">
+          <span class="field__label">Related alert ID (optional)</span>
+          <input class="input" type="text" name="relatedAlertId" maxlength="36"
+            placeholder="UUID of an existing alert">
+        </label>
+        <label class="field">
+          <span class="field__label">Related obligation ID (optional)</span>
+          <input class="input" type="text" name="relatedObligationId" maxlength="36"
+            placeholder="UUID of an existing obligation">
+        </label>
+        <button class="btn btn--primary" type="submit">Generate draft</button>
+        <p class="panel__meta">A draft will be created for your review. Nothing is sent until you explicitly confirm.</p>
+      </form>
+    </section>
+  </div>`;
+}
+
+export function adminCommunicationDetailPage(data: {
+  csrf: string;
+  comm: CommunicationEntry;
+  notice?: { kind: 'ok' | 'error' | 'warn'; text: string };
+}): string {
+  const c = data.comm;
+  const isDraft = c.status === 'DRAFT';
+
+  return `${data.notice ? notice(data.notice.kind, data.notice.text) : ''}
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a class="link" href="/admin/communicate">Communications</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">${esc(c.subject.slice(0, 60))}</span>
+  </nav>
+  <div class="split split--lead">
+    <section class="panel" aria-labelledby="h-comm-detail">
+      <div class="panel__head">
+        <h2 id="h-comm-detail" class="panel__title">
+          ${isDraft ? 'Review and edit draft' : 'Communication record'}
+        </h2>
+        <div class="row row--tags">
+          ${c.ai_assisted ? `<span class="ai-badge">AI-assisted</span>` : ''}
+          ${c.status === 'SENT' ? statusTag('EXECUTED') : c.status === 'FAILED' ? statusTag('FAILED') : '<span class="tag tag--muted"><span class="tag__dot" aria-hidden="true"></span>Draft</span>'}
+        </div>
+      </div>
+      <dl class="facts">
+        <div><dt>Subsidiary</dt><dd>${esc(c.subsidiary_name)}</dd></div>
+        <div><dt>Recipient</dt><dd>${esc(c.recipient_name)}<span class="cell__sub">${esc(c.recipient_email)}</span></dd></div>
+        ${c.sent_at ? `<div><dt>Sent at</dt><dd>${esc(fmtDateTime(c.sent_at))}</dd></div>` : ''}
+        ${c.transport_message_id ? `<div><dt>Message ID</dt><dd class="mono">${esc(c.transport_message_id.slice(0, 40))}</dd></div>` : ''}
+        ${c.error_message ? `<div><dt>Delivery error</dt><dd class="text-crit">${esc(c.error_message)}</dd></div>` : ''}
+        ${c.ai_model ? `<div><dt>AI model</dt><dd>${esc(c.ai_model)}</dd></div>` : ''}
+        ${c.related_alert_id ? `<div><dt>Related alert</dt><dd><a class="link" href="/alerts/${esc(c.related_alert_id)}">View alert</a></dd></div>` : ''}
+        ${c.related_obligation_id ? `<div><dt>Related obligation</dt><dd><a class="link" href="/obligations/${esc(c.related_obligation_id)}">View obligation</a></dd></div>` : ''}
+      </dl>
+    </section>
+    <section class="panel" aria-labelledby="h-comm-actions">
+      <div class="panel__head">
+        <h2 id="h-comm-actions" class="panel__title">Actions</h2>
+      </div>
+      <div class="panel__body">
+        ${isDraft
+          ? `<p class="prose prose--muted">Review the draft below. You can edit the subject and body before sending. Nothing is sent until you click "Send now".</p>
+             <form method="post" action="/admin/communicate/${esc(c.id)}/send" class="stack">
+               <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+               <p class="panel__meta">This will send the email immediately to <strong>${esc(c.recipient_email)}</strong>. This action cannot be undone.</p>
+               <button class="btn btn--primary" type="submit">Send now</button>
+             </form>`
+          : c.status === 'FAILED'
+            ? `<form method="post" action="/admin/communicate/${esc(c.id)}/retry" class="stack">
+                <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+                <p class="panel__meta">The previous send attempt failed. Retrying will create a new delivery attempt.</p>
+                <button class="btn btn--ghost" type="submit">Retry send</button>
+               </form>`
+            : `<p class="prose prose--muted">This communication has been ${c.status.toLowerCase()}.</p>`
+        }
+      </div>
+    </section>
+  </div>
+  ${isDraft
+    ? `<section class="panel" aria-labelledby="h-comm-edit">
+        <div class="panel__head">
+          <h2 id="h-comm-edit" class="panel__title">Edit draft</h2>
+        </div>
+        <form method="post" action="/admin/communicate/${esc(c.id)}/update" class="stack">
+          <input type="hidden" name="_csrf" value="${esc(data.csrf)}">
+          <label class="field">
+            <span class="field__label">Subject <span aria-hidden="true">*</span></span>
+            <input class="input" type="text" name="subject" value="${esc(c.subject)}" required maxlength="200">
+          </label>
+          <label class="field">
+            <span class="field__label">Message body <span aria-hidden="true">*</span></span>
+            <textarea class="input" name="messageBody" rows="12" required style="resize:vertical;font-family:var(--mono);font-size:12px">${esc(c.message_body)}</textarea>
+          </label>
+          ${c.ai_assisted ? `<div class="notice notice--info">The original draft was AI-assisted. You are editing a human-reviewed version. The edit is yours.</div>` : ''}
+          <button class="btn btn--ghost" type="submit">Save edits</button>
+        </form>
+      </section>`
+    : `<section class="panel" aria-labelledby="h-comm-body">
+        <div class="panel__head">
+          <h2 id="h-comm-body" class="panel__title">Message sent</h2>
+        </div>
+        <div class="panel__body">
+          <pre class="comms-preview">${esc(c.message_body)}</pre>
+        </div>
+      </section>`
+  }`;
 }

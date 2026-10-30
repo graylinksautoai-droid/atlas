@@ -1526,3 +1526,180 @@ input[type="file"].input { padding: 7px; font-size: 12.5px; }
   color: var(--text-ui);
   font-style: italic;
 }
+
+/* =========================================================================
+   25. Topbar bell and unread badge
+   ========================================================================= */
+
+.topbar__bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background 100ms ease, color 100ms ease;
+  flex-shrink: 0;
+}
+.topbar__bell:hover { background: var(--surface-subtle); color: var(--text-primary); }
+.topbar__bell:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.topbar__bell-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.topbar__badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--crit);
+  color: var(--surface);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* =========================================================================
+   26. Notification centre
+   ========================================================================= */
+
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notif-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s-3);
+  align-items: flex-start;
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--border);
+  transition: background 80ms ease;
+}
+.notif-item:last-child { border-bottom: 0; }
+.notif-item--unread { background: var(--blue-soft); }
+.notif-item--unread:hover { background: #e5ebfe; }
+.notif-item:not(.notif-item--unread):hover { background: var(--surface-hover); }
+
+.notif-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+  background: var(--border-strong);
+}
+.notif-item--unread .notif-dot { background: var(--blue); }
+
+.notif-body { min-width: 0; }
+
+.notif-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 2px;
+  display: block;
+}
+.notif-item--unread .notif-title { color: var(--blue-hover); }
+
+.notif-msg {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin: 0 0 3px;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+}
+
+.notif-meta {
+  font-size: 11px;
+  color: var(--text-ui);
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.notif-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--blue);
+  text-decoration: none;
+}
+.notif-link:hover { text-decoration: underline; }
+
+/* =========================================================================
+   27. Communication compose form helpers
+   ========================================================================= */
+
+.comms-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.comms-preview {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s-4);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow-y: auto;
+  color: var(--text-secondary);
+}
+
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  border: 1px solid var(--info-border);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--info);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.ai-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--info);
+}
+
+/* kpi--link is used in adminHubPage — was missing from CSS */
+.kpi--link {
+  cursor: pointer;
+  text-decoration: none !important;
+  transition: box-shadow 120ms ease, transform 80ms ease;
+}
+.kpi--link:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.kpi--link:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}

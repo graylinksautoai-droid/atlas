@@ -104,6 +104,7 @@ const ICONS: Record<string, string> = {
   activity:      `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M1 8h2.5L5 4l3 8 2-5 1.5 2.5H15" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   admin:         `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="8" cy="5" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M2 14c0-3 2-5 6-5s6 2 6 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
   notifications: `<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 1.5c-3 0-5 2-5 4.5v2l-1 2h12l-1-2V6c0-2.5-2-4.5-5-4.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+  'admin-notify':`<svg class="rail__link-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 3h12v9H2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2 3l6 5.5L14 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
 const NAV: Array<{ href: string; label: string; key: string; roles?: string[] }> = [
@@ -114,8 +115,9 @@ const NAV: Array<{ href: string; label: string; key: string; roles?: string[] }>
   { href: '/documents',    label: 'Documents',        key: 'documents'     },
   { href: '/alerts',       label: 'Alerts',           key: 'alerts'        },
   { href: '/activity',     label: 'Agent activity',   key: 'activity'      },
-  { href: '/admin',           label: 'Administration',   key: 'admin',           roles: ['ADMIN'] },
-  { href: '/admin/notifications', label: 'Notifications', key: 'notifications',  roles: ['ADMIN'] },
+  { href: '/notifications', label: 'Notifications',  key: 'notifications' },
+  { href: '/admin',        label: 'Administration',   key: 'admin',           roles: ['ADMIN'] },
+  { href: '/admin/notifications', label: 'Email settings',  key: 'admin-notify',  roles: ['ADMIN'] },
 ];
 
 export function layout(input: {
@@ -126,6 +128,7 @@ export function layout(input: {
   subtitle?: string;
   csrf?: string;
   wide?: boolean;
+  unreadCount?: number;
 }): string {
   const nav = NAV.filter((item) => !item.roles || item.roles.includes(input.user.role))
     .map((item) => {
@@ -169,6 +172,10 @@ export function layout(input: {
         ${input.subtitle ? `<p class="topbar__sub">${esc(input.subtitle)}</p>` : ''}
       </div>
       <div class="topbar__right">
+        <a class="topbar__bell" href="/notifications" aria-label="${(input.unreadCount ?? 0) > 0 ? `${input.unreadCount} unread notification${(input.unreadCount ?? 0) === 1 ? '' : 's'}` : 'Notifications'}">
+          <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="topbar__bell-icon"><path d="M10 2C7.2 2 5 4.2 5 7v3l-1.5 2.5h13L15 10V7c0-2.8-2.2-5-5-5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.5 16.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          ${(input.unreadCount ?? 0) > 0 ? `<span class="topbar__badge" aria-hidden="true">${Math.min(input.unreadCount ?? 0, 99)}</span>` : ''}
+        </a>
         <span class="topbar__role" title="Session role">${esc(input.user.role)}</span>
         <span class="topbar__user">${esc(input.user.name)}</span>
         <form method="post" action="/logout" class="inline">
