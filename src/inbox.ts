@@ -157,3 +157,55 @@ export async function markAllRead(userId: string): Promise<number> {
   );
   return r.rowCount ?? 0;
 }
+
+/**
+ * Fan-out in-app notifications to all active COMPLIANCE and ADMIN users
+ * when a new HIGH or CRITICAL alert is raised.
+ *
+ * - Fetches active users with role IN ('COMPLIANCE', 'ADMIN').
+ * - Calls createNotification() per user with a per-user dedupe key so
+ *   re-running the scheduler never produces duplicate notifications.
+ * - Fire-and-forget: never throws (errors are silently swallowed).
+ */
+export async function notifyUsersOfAlert(params: {
+  alertId: string;
+  alertType: string;
+  severity: 'HIGH' | 'CRITICAL';
+  subsidiaryName: string;
+  obligationTitle: string | null;
+  link: string;
+}): Promise<void> {
+  try {
+    const pool = getPool();
+    const usersResult = await pool.query(
+      `SELECT id FROM app_user WHERE role IN ('COMPLIANCE','ADMIN') AND is_active = true`,
+      [],
+    );
+    const users = usersResult.rows as Array<{ id: string }>;
+
+    const title =
+      `${params.severity} alert: ${params.subsidiaryName}` +
+      (params.obligationTitle ? ` — ${params.obligationTitle}` : '');
+    const message =
+      `A ${params.severity.toLowerCase()} ${params.alertType.replace(/_/g, ' ').toLowerCase()} alert ` +
+      `was raised for ${params.subsidiaryName}` +
+      (params.obligationTitle ? ` (${params.obligationTitle})` : '') + '.';
+
+    await Promise.all(
+      users.map((u) =>
+        createNotification({
+          recipientUserId: u.id,
+          dedupeKey: `INBOX:${params.alertId}:${u.id}`,
+          type: params.severity === 'CRITICAL' ? 'CRITICAL_ALERT' : 'HIGH_ALERT',
+          title: title.slice(0, 200),
+          message: message.slice(0, 1000),
+          entityType: 'alert',
+          entityId: params.alertId,
+          link: params.link,
+        }),
+      ),
+    );
+  } catch {
+    // Never block the compliance sweep
+  }
+}

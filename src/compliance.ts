@@ -15,6 +15,7 @@ import {
 } from './rules.ts';
 import { handleAlert } from './agent.ts';
 import { notifyCriticalAlert } from './notify.ts';
+import { notifyUsersOfAlert } from './inbox.ts';
 
 const LOCK_KEY = 727_001;
 
@@ -312,6 +313,19 @@ async function evaluateObligation(
         dueAt: row.due_at,
       }).catch(() => undefined);
     }
+
+    // In-app notifications for HIGH and CRITICAL new alerts (fire-and-forget,
+    // per-user dedupe ensures re-running the scheduler never duplicates).
+    if (result.alertId && (candidate.severity === 'HIGH' || candidate.severity === 'CRITICAL')) {
+      notifyUsersOfAlert({
+        alertId: result.alertId,
+        alertType: candidate.type,
+        severity: candidate.severity as 'HIGH' | 'CRITICAL',
+        subsidiaryName: row.subsidiary_name,
+        obligationTitle: row.title,
+        link: `/alerts/${result.alertId}`,
+      }).catch(() => undefined);
+    }
   }
   return { alerts, runs };
 }
@@ -523,6 +537,18 @@ async function checkProjectSchedules(now: Date, checkId: string | null): Promise
             evidenceSummary: evidence,
             recommendedAction: action,
             dueAt: new Date(proj.target_date),
+          }).catch(() => undefined);
+        }
+
+        // In-app notifications for HIGH and CRITICAL schedule alerts
+        if (severity === 'HIGH' || severity === 'CRITICAL') {
+          notifyUsersOfAlert({
+            alertId,
+            alertType: 'AT_RISK_SCHEDULE',
+            severity: severity as 'HIGH' | 'CRITICAL',
+            subsidiaryName: proj.subsidiary_name,
+            obligationTitle: proj.name,
+            link: `/alerts/${alertId}`,
           }).catch(() => undefined);
         }
       });

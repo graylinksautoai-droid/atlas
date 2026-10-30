@@ -14,11 +14,38 @@
  */
 
 import nodemailer from 'nodemailer';
-import { one, many, query } from './db.ts';
+import { one, many, query, pool as defaultPool } from './db.ts';
 import { audit } from './audit.ts';
 import { config, modelConfigured } from './config.ts';
 import { AiUnavailable, AiInvalidOutput } from './ai.ts';
 import { z } from 'zod';
+
+/* ── Injectable overrides for tests ──────────────────────────────────────── */
+
+type MockPool = { query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount?: number }> };
+let _commsPoolOverride: MockPool | null = null;
+export function setCommsPoolOverride(p: MockPool | null): void { _commsPoolOverride = p; }
+function getCommsPool() { return (_commsPoolOverride ?? defaultPool) as typeof defaultPool; }
+
+type MockTransport = { sendMail: (msg: object) => Promise<{ messageId?: string }> };
+let _commsTransportOverride: MockTransport | null = null;
+export function setCommsTransportOverride(t: MockTransport | null): void { _commsTransportOverride = t; }
+
+/* Pool-aware helpers (use override when set, otherwise delegate to db.ts) */
+async function poolOne<T extends object>(sql: string, params: unknown[]): Promise<T | null> {
+  if (!_commsPoolOverride) return one<T>(sql, params);
+  const r = await _commsPoolOverride.query(sql, params);
+  return (r.rows[0] as T | undefined) ?? null;
+}
+async function poolMany<T extends object>(sql: string, params: unknown[]): Promise<T[]> {
+  if (!_commsPoolOverride) return many<T>(sql, params);
+  const r = await _commsPoolOverride.query(sql, params);
+  return r.rows as T[];
+}
+async function poolQuery(sql: string, params: unknown[]): Promise<{ rowCount?: number }> {
+  if (!_commsPoolOverride) return query(sql, params) as Promise<{ rowCount?: number }>;
+  return _commsPoolOverride.query(sql, params);
+}
 
 /* ── Types ──────────────────────────────────────────────────────────────── */
 
@@ -54,7 +81,7 @@ export interface CommsMutateResult {
 /* ── Queries ────────────────────────────────────────────────────────────── */
 
 export async function listCommunications(limit = 50): Promise<CommunicationEntry[]> {
-  return many<CommunicationEntry>(
+  return poolMany<CommunicationEntry>(
     `SELECT c.id, c.subsidiary_id, s.name AS subsidiary_name,
             c.initiated_by, u.name AS initiator_name,
             c.recipient_contact_id, c.recipient_name, c.recipient_email,
@@ -72,7 +99,7 @@ export async function listCommunications(limit = 50): Promise<CommunicationEntry
 }
 
 export async function getCommunication(id: string): Promise<CommunicationEntry | null> {
-  return one<CommunicationEntry>(
+  return poolOne<CommunicationEntry>(
     `SELECT c.id, c.subsidiary_id, s.name AS subsidiary_name,
             c.initiated_by, u.name AS initiator_name,
             c.recipient_contact_id, c.recipient_name, c.recipient_email,
@@ -104,7 +131,7 @@ export interface CreateDraftInput {
  */
 export async function createDraft(input: CreateDraftInput): Promise<CommsMutateResult & { draft?: CommunicationEntry }> {
   // Load recipient contact
-  const contact = await one<{
+  const contact = await poolOne<{
     id: string; name: string; email: string; subsidiary_id: string; is_active: boolean;
   }>(
     `SELECT id, name, email, subsidiary_id, is_active FROM subsidiary_contact WHERE id = $1`,
@@ -117,7 +144,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CommsMutateR
   }
 
   // Load subsidiary
-  const sub = await one<{ id: string; name: string; sector: string }>(
+  const sub = await poolOne<{ id: string; name: string; sector: string }>(
     `SELECT id, name, sector FROM subsidiary WHERE id = $1`,
     [input.subsidiaryId],
   );
@@ -125,7 +152,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CommsMutateR
 
   // Load related obligation if provided
   const obligation = input.relatedObligationId
-    ? await one<{ id: string; title: string; kind: string; due_at: Date; status: string; owner_name: string }>(
+    ? await poolOne<{ id: string; title: string; kind: string; due_at: Date; status: string; owner_name: string }>(
         `SELECT id, title, kind, due_at, status::text AS status, owner_name
            FROM obligation WHERE id = $1`,
         [input.relatedObligationId],
@@ -134,7 +161,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CommsMutateR
 
   // Load related alert if provided
   const alert = input.relatedAlertId
-    ? await one<{ id: string; type: string; severity: string; evidence_summary: string; recommended_action: string }>(
+    ? await poolOne<{ id: string; type: string; severity: string; evidence_summary: string; recommended_action: string }>(
         `SELECT id, type, severity, evidence_summary, recommended_action
            FROM alert WHERE id = $1`,
         [input.relatedAlertId],
@@ -166,7 +193,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CommsMutateR
     body = deterministicDraft.body;
   }
 
-  const row = await one<{ id: string }>(
+  const row = await poolOne<{ id: string }>(
     `INSERT INTO communication_log
        (subsidiary_id, initiated_by, recipient_contact_id, recipient_name, recipient_email,
         subject, message_body, related_alert_id, related_obligation_id,
@@ -365,7 +392,7 @@ export async function updateDraft(input: UpdateDraftInput): Promise<CommsMutateR
   if (input.subject.trim().length < 1) return { ok: false, reason: 'Subject is required.' };
   if (input.messageBody.trim().length < 10) return { ok: false, reason: 'Message body must be at least 10 characters.' };
 
-  const r = await query(
+  const r = await poolQuery(
     `UPDATE communication_log
         SET subject = $2, message_body = $3, updated_at = now()
       WHERE id = $1 AND status = 'DRAFT'`,
@@ -396,7 +423,7 @@ export async function sendCommunication(
   id: string,
   actorId: string,
 ): Promise<SendCommunicationResult> {
-  const comm = await one<{
+  const comm = await poolOne<{
     id: string; status: string; subject: string; message_body: string;
     recipient_email: string; recipient_name: string;
     subsidiary_id: string; subsidiary_name: string;
@@ -414,7 +441,7 @@ export async function sendCommunication(
   if (comm.status !== 'DRAFT') return { ok: false, reason: `Cannot send a communication with status ${comm.status}.` };
 
   // Mark PENDING before sending (idempotency guard)
-  await query(
+  await poolQuery(
     `UPDATE communication_log SET status = 'PENDING', updated_at = now() WHERE id = $1`,
     [id],
   );
@@ -427,8 +454,22 @@ export async function sendCommunication(
   const smtpPort = Number(process.env.SMTP_PORT ?? 587);
   const smtpSecure = process.env.SMTP_SECURE === '1';
 
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    await query(
+  // Use injected transport override if present (tests), otherwise build from SMTP config
+  const transport: { sendMail: (msg: object) => Promise<{ messageId?: string }> } =
+    _commsTransportOverride ?? (() => {
+      if (!smtpHost || !smtpUser || !smtpPass) return null as unknown as MockTransport;
+      return nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        auth: { user: smtpUser, pass: smtpPass },
+        connectionTimeout: 8_000,
+        greetingTimeout: 5_000,
+      });
+    })();
+
+  if (!transport) {
+    await poolQuery(
       `UPDATE communication_log
           SET status = 'FAILED', error_message = $2, updated_at = now()
         WHERE id = $1`,
@@ -436,15 +477,6 @@ export async function sendCommunication(
     );
     return { ok: false, reason: 'SMTP is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS in .env.' };
   }
-
-  const transport = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpSecure,
-    auth: { user: smtpUser, pass: smtpPass },
-    connectionTimeout: 8_000,
-    greetingTimeout: 5_000,
-  });
 
   try {
     const info = await transport.sendMail({
@@ -455,7 +487,7 @@ export async function sendCommunication(
     });
 
     const messageId = String(info.messageId ?? '');
-    await query(
+    await poolQuery(
       `UPDATE communication_log
           SET status = 'SENT', transport_message_id = $2, sent_at = now(), updated_at = now()
         WHERE id = $1`,
@@ -480,7 +512,7 @@ export async function sendCommunication(
     const msg = err instanceof Error ? err.message : String(err);
     const safe = msg.replace(/\b[\w.+-]+@[\w.-]+\b/g, '[email]').slice(0, 400);
 
-    await query(
+    await poolQuery(
       `UPDATE communication_log
           SET status = 'FAILED', error_message = $2, updated_at = now()
         WHERE id = $1`,
